@@ -19,17 +19,23 @@ def collect(
     engine = get_engine()
     init_db(engine)
 
-    if platform == "spotify":
+    from music_graph.pipeline.collect import BFSOrchestrator
+
+    if platform == "deezer":
+        from music_graph.collectors.deezer import DeezerCollector
+
+        collector = DeezerCollector()
+    elif platform == "spotify":
         from music_graph.collectors.spotify import SpotifyCollector
-        from music_graph.pipeline.collect import BFSOrchestrator
 
         collector = SpotifyCollector()
-        with get_session(engine) as session:
-            orchestrator = BFSOrchestrator(session, collector)
-            orchestrator.run(max_depth=max_depth)
     else:
         logger.error("Platform '{}' not yet supported", platform)
         raise typer.Exit(1)
+
+    with get_session(engine) as session:
+        orchestrator = BFSOrchestrator(session, collector)
+        orchestrator.run(max_depth=max_depth)
 
 
 @app.command()
@@ -68,6 +74,7 @@ def build_graph(
     node_type: str = typer.Option("track", help="Node type: track, artist, genre"),
     algorithm: str = typer.Option("jaccard", help="Weight algorithm: raw, jaccard, pmi, cosine"),
     min_weight: float = typer.Option(0.01, help="Minimum edge weight threshold"),
+    min_cooccurrence: int = typer.Option(1, "--min-cooccurrence", help="Minimum raw co-occurrence count"),
     output: Path = typer.Option(
         Path("data/exports/graph.gexf"), help="Output file path"
     ),
@@ -89,6 +96,7 @@ def build_graph(
             node_type=node_type,
             algorithm=algorithm,
             min_weight=min_weight,
+            min_cooccurrence=min_cooccurrence,
             output_path=output,
             export_format=export_format,
         )

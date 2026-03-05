@@ -22,3 +22,4 @@ data/
 *.swo
 .DS_Store
 .playwright-mcp/
+.spotify_cache

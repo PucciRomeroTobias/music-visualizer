@@ -6,8 +6,7 @@ from datetime import datetime
 from loguru import logger
 from sqlmodel import Session, select
 
-from music_graph.collectors.base import RawArtist, RawPlaylist, RawTrack
-from music_graph.collectors.spotify import SpotifyCollector
+from music_graph.collectors.base import AbstractCollector, RawArtist, RawPlaylist, RawTrack
 from music_graph.config import load_seeds, load_settings
 from music_graph.models.artist import Artist, ArtistGenre, ArtistSource
 from music_graph.models.base import ArtistRole, SourcePlatform
@@ -199,7 +198,7 @@ class Ingester:
 class BFSOrchestrator:
     """BFS collection across playlists starting from seed keywords."""
 
-    def __init__(self, session: Session, collector: SpotifyCollector):
+    def __init__(self, session: Session, collector: AbstractCollector):
         self._session = session
         self._collector = collector
         self._ingester = Ingester(session)
@@ -254,7 +253,7 @@ class BFSOrchestrator:
             playlist = self._session.exec(
                 select(Playlist).where(
                     Playlist.platform_id == playlist_pid,
-                    Playlist.platform == SourcePlatform.SPOTIFY,
+                    Playlist.platform == self._collector.platform,
                 )
             ).first()
             if not playlist:

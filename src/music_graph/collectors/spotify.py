@@ -5,18 +5,21 @@ import os
 from loguru import logger
 from spotipy import Spotify
 from spotipy.exceptions import SpotifyException
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from music_graph.collectors.base import RawArtist, RawPlaylist, RawTrack
 from music_graph.collectors.rate_limiter import RateLimiter
-from music_graph.config import load_settings
+from music_graph.config import PROJECT_ROOT, load_settings
 from music_graph.models.base import SourcePlatform
+
+SPOTIFY_SCOPES = "playlist-read-private playlist-read-collaborative"
 
 
 class SpotifyCollector:
     """Collects data from Spotify API via spotipy.
 
-    Uses client credentials flow (no user login required).
+    Uses OAuth user flow for full API access (playlist tracks, genres, etc.).
+    Falls back to client credentials if no redirect URI is configured.
     """
 
     platform = SourcePlatform.SPOTIFY
@@ -29,9 +32,17 @@ class SpotifyCollector:
                 "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set in .env"
             )
 
-        auth_manager = SpotifyClientCredentials(
+        redirect_uri = os.environ.get(
+            "SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback"
+        )
+        cache_path = PROJECT_ROOT / ".spotify_cache"
+
+        auth_manager = SpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope=SPOTIFY_SCOPES,
+            cache_path=str(cache_path),
         )
         self._sp = Spotify(auth_manager=auth_manager)
 
@@ -89,17 +100,17 @@ class SpotifyCollector:
 
         while True:
             results = self._api_call(
-                self._sp.playlist_items,
+                self._sp.playlist_tracks,
                 playlist_id,
                 offset=offset,
                 limit=batch_size,
-                fields="items(track(id,name,artists,duration_ms,external_ids,album)),next",
+                market="US",
             )
             items = results.get("items", [])
             for item in items:
                 track_data = item.get("track")
                 if track_data is None or track_data.get("id") is None:
-                    continue  # Skip local files or unavailable tracks
+                    continue
 
                 artists = track_data.get("artists", [])
                 artist_name = artists[0]["name"] if artists else "Unknown"

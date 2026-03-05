@@ -87,6 +87,7 @@ def build_graph(
     node_type: str = "track",
     algorithm: str = "jaccard",
     min_weight: float = 0.01,
+    min_cooccurrence: int = 1,
     output_path: Path | None = None,
     export_format: str = "gexf",
 ) -> nx.Graph:
@@ -97,6 +98,7 @@ def build_graph(
         node_type: "track", "artist", or "genre".
         algorithm: Weight algorithm name from ALGORITHMS.
         min_weight: Minimum edge weight to include.
+        min_cooccurrence: Minimum raw co-occurrence count to consider.
         output_path: Path to export the graph (optional).
         export_format: Export format (gexf, graphml, json).
 
@@ -109,7 +111,14 @@ def build_graph(
         raise ValueError(
             f"Unknown node_type '{node_type}'. Options: {list(PROJECTIONS.keys())}"
         )
-    cooccurrence = project_fn(session)
+    cooccurrence_raw = project_fn(session)
+
+    # Filter by minimum co-occurrence count
+    cooccurrence = {
+        pair: count
+        for pair, count in cooccurrence_raw.items()
+        if count >= min_cooccurrence
+    }
 
     if not cooccurrence:
         logger.warning("No co-occurrence data for node_type '{}'", node_type)

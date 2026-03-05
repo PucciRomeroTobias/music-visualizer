@@ -7,6 +7,7 @@ class SourcePlatform(str, enum.Enum):
     """Music platform source."""
 
     SPOTIFY = "spotify"
+    DEEZER = "deezer"
     SOUNDCLOUD = "soundcloud"
     LASTFM = "lastfm"
 

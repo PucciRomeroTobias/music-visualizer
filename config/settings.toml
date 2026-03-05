@@ -6,6 +6,11 @@ requests_per_second = 5
 burst = 10
 retry_after_default = 5
 
+[rate_limits.deezer]
+requests_per_second = 8
+burst = 15
+retry_after_default = 5
+
 [rate_limits.soundcloud]
 requests_per_second = 2
 burst = 5
