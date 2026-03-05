@@ -1,0 +1,37 @@
+[database]
+path = "data/music_graph.db"
+
+[rate_limits.spotify]
+requests_per_second = 5
+burst = 10
+retry_after_default = 5
+
+[rate_limits.soundcloud]
+requests_per_second = 2
+burst = 5
+retry_after_default = 10
+
+[rate_limits.lastfm]
+requests_per_second = 5
+burst = 10
+retry_after_default = 5
+
+[collection]
+max_depth = 2
+search_limit = 10
+playlist_batch_size = 100
+
+[graph]
+default_node_type = "track"
+default_algorithm = "jaccard"
+default_min_weight = 0.01
+default_export_format = "gexf"
+
+[matching]
+fuzzy_threshold = 85
+isrc_match_weight = 1.0
+musicbrainz_match_weight = 0.95
+fuzzy_match_weight = 0.8
+
+[logging]
+level = "INFO"

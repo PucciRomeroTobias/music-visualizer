@@ -1,0 +1,39 @@
+[keywords]
+search_terms = [
+    "bounce",
+    "bouncy techno",
+    "bouncy trance",
+    "donk",
+    "uk bounce",
+    "hard bounce",
+    "scouse house",
+    "bouncy house",
+    "donk techno",
+]
+
+[playlists]
+# Known Spotify playlist IDs containing bounce/donk tracks
+spotify = []
+
+[artists]
+# Known artist IDs to use as seeds
+spotify = []
+
+[genre_scope]
+# Genre names to consider in-scope for the BFS expansion
+include = [
+    "bounce",
+    "bouncy techno",
+    "bouncy trance",
+    "donk",
+    "uk bounce",
+    "hard bounce",
+    "scouse house",
+    "hard dance",
+    "happy hardcore",
+    "makina",
+    "hard trance",
+    "hardstyle",
+    "gabber",
+    "pumping house",
+]
