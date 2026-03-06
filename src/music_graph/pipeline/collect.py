@@ -208,19 +208,45 @@ class Ingester:
 
 
 class BFSOrchestrator:
-    """BFS collection across playlists starting from seed keywords."""
+    """BFS collection across playlists starting from seed keywords.
+
+    Resumable: loads already-seen playlists/artists from DB on startup,
+    skips playlists with tracks_collected=True.
+    """
 
     def __init__(self, session: Session, collector: AbstractCollector):
         self._session = session
         self._collector = collector
         self._ingester = Ingester(session)
-        self._seen_playlists: set[str] = set()
-        self._seen_artists: set[str] = set()
         self._settings = load_settings()
         self._seeds = load_seeds()
 
+        # Load already-processed state from DB for resumability
+        self._seen_playlists = self._load_seen_playlists()
+        self._seen_artists = self._load_seen_artists()
+
+    def _load_seen_playlists(self) -> set[str]:
+        """Load platform IDs of playlists already known in the DB."""
+        results = self._session.exec(
+            select(Playlist.platform_id).where(
+                Playlist.platform == self._collector.platform
+            )
+        ).all()
+        return set(results)
+
+    def _load_seen_artists(self) -> set[str]:
+        """Load platform IDs of artists already fetched for this platform."""
+        from music_graph.models.artist import ArtistSource
+
+        results = self._session.exec(
+            select(ArtistSource.platform_id).where(
+                ArtistSource.platform == self._collector.platform
+            )
+        ).all()
+        return set(results)
+
     def run(self, max_depth: int | None = None) -> None:
-        """Run BFS collection from seed keywords."""
+        """Run BFS collection from seed keywords (resumable)."""
         if max_depth is None:
             max_depth = self._settings.get("collection", {}).get("max_depth", 2)
 
@@ -242,13 +268,39 @@ class BFSOrchestrator:
                     self._ingester.ingest_playlist(raw_pl, depth=0)
                     queue.append((raw_pl.platform_id, 0))
 
+        # Also queue playlists that were discovered but never had tracks fetched
+        pending_playlists = self._session.exec(
+            select(Playlist).where(
+                Playlist.platform == self._collector.platform,
+                Playlist.tracks_collected == False,  # noqa: E712
+            )
+        ).all()
+        for pl in pending_playlists:
+            if pl.platform_id not in {pid for pid, _ in queue}:
+                queue.append((pl.platform_id, pl.collection_depth))
+
         self._session.commit()
-        logger.info("Seeded {} playlists from search", len(queue))
+        logger.info(
+            "{} playlists in queue ({} pending from previous runs)",
+            len(queue),
+            len(pending_playlists),
+        )
 
         # Step 2: BFS
+        processed = 0
         while queue:
             playlist_pid, depth = queue.popleft()
             if depth > max_depth:
+                continue
+
+            # Skip if tracks already collected
+            existing_pl = self._session.exec(
+                select(Playlist).where(
+                    Playlist.platform_id == playlist_pid,
+                    Playlist.platform == self._collector.platform,
+                )
+            ).first()
+            if existing_pl and existing_pl.tracks_collected:
                 continue
 
             logger.info(
@@ -261,13 +313,7 @@ class BFSOrchestrator:
             # Fetch tracks
             raw_tracks = self._collector.get_playlist_tracks(playlist_pid)
 
-            # Get the playlist DB record
-            playlist = self._session.exec(
-                select(Playlist).where(
-                    Playlist.platform_id == playlist_pid,
-                    Playlist.platform == self._collector.platform,
-                )
-            ).first()
+            playlist = existing_pl
             if not playlist:
                 continue
 
@@ -293,7 +339,6 @@ class BFSOrchestrator:
                                 g.lower() for g in raw_artist.genres
                             )
                             if artist_genres & genre_scope:
-                                # Find more playlists for this artist's tracks
                                 more_playlists = (
                                     self._collector.find_playlists_containing_track(
                                         raw_track.title, raw_artist.name, limit=5
@@ -311,13 +356,18 @@ class BFSOrchestrator:
                             "Failed to fetch artist {}", artist_pid
                         )
 
+            # Mark playlist as fully collected
+            playlist.tracks_collected = True
             self._session.commit()
+            processed += 1
             logger.info(
                 "Committed playlist {} ({} tracks)", playlist_pid, len(raw_tracks)
             )
 
         logger.info(
-            "BFS complete. Processed {} playlists, {} artists",
+            "BFS complete. Processed {} playlists this run, "
+            "{} total known playlists, {} total known artists",
+            processed,
             len(self._seen_playlists),
             len(self._seen_artists),
         )
