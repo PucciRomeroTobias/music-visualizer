@@ -4,9 +4,9 @@ Record of all data collection runs. Update this file after every collection.
 
 ## Current DB State
 
-- **Playlists**: 188 Deezer + 787 SoundCloud = 975 total
-- **Tracks**: 70,862 canonical (63,702 Deezer sources + 7,160 SoundCloud sources)
-- **Artists**: 20,091 canonical (17,292 Deezer sources + 4,035 SoundCloud sources)
+- **Playlists**: 188 Deezer + 808 SoundCloud = 996 total
+- **Tracks**: 72,416 canonical (63,702 Deezer sources + 8,714 SoundCloud sources)
+- **Artists**: 21,129 canonical (17,292 Deezer sources + 5,073 SoundCloud sources)
 - **Genres**: 0 (enrichment not yet run)
 - **ISRCs**: 0 (enrichment not yet run)
 - **Cross-platform matches**: 161 accepted (65 exact + 96 fuzzy, artists only), 3,254 pending
@@ -80,8 +80,57 @@ Record of all data collection runs. Update this file after every collection.
 - **Note**: Artists only, no track matching yet. No ISRCs available to match on.
 - **CLI**: `music-graph match`
 
+## Tobasso's SoundCloud Playlists (COMPLETED)
+
+All 31 tobasso playlists now in DB (21 newly ingested on 2026-03-06, 10 previously existed).
+
+| Status | Slug | Tracks |
+|---|---|---|
+| done | bouncy-techno-2 | 14 (pre-existing) |
+| done | neo-trance | 8 (pre-existing) |
+| done | bouncy-trance-5 | 85 |
+| done | pista-vacia-bouncy | 24 |
+| done | bouncy-electro-house | 9 |
+| done | bouncy-conga | 9 |
+| done | hardgroove | 18 (pre-existing) |
+| done | opening-briela | 116 |
+| done | bouncy-volador | 35 (pre-existing) |
+| done | hard-bounce-ii | 86 |
+| done | euro-trance-2 | 61 |
+| done | bouncy-trance-4 | 98 |
+| done | meme-tracks | 13 (pre-existing) |
+| done | hyper-techno | 6 |
+| done | hard-dance | 2 (pre-existing) |
+| done | donk | 4 (pre-existing) |
+| done | bouncy-trance-3 | 89 |
+| done | bouncy-techno | 138 |
+| done | electronics | 21 |
+| done | hardhouse | 55 (pre-existing) |
+| done | latin-core | 34 |
+| done | acid-bounce | 75 |
+| done | funky-hard | 63 |
+| done | bouncy-psy | 38 |
+| done | euro-trance-1 | 100 |
+| done | bouncy-trance-2 | 184 |
+| done | hard-bounce-i | 86 |
+| done | bouncy-trance | 225 |
+| done | tech-house | 7 |
+| done | dnb-y-dubstep | 1 (pre-existing) |
+| done | techno-lindo | 47 (pre-existing) |
+
+### 8. SoundCloud — Tobasso full playlist download
+
+- **Date**: 2026-03-06
+- **Platform**: SoundCloud (unofficial API v2)
+- **Method**: Download all playlists from tobasso (user_id 296527166), including private ones
+- **Auth**: oauth_token + client_id (renewed 2026-03-06), browser User-Agent required for private playlists
+- **Result**: 21 new playlists ingested (1,554 tracks, 1,038 artists parsed), 10 pre-existing skipped
+- **Key fix**: Added browser User-Agent to SoundCloud collector (SC blocks `python-requests` UA for private playlists)
+- **CLI**: `music-graph sc-collect --user-id 296527166`
+
 ## Not Yet Done
 
+- [x] ~~Download tobasso's playlists~~ (completed 2026-03-06, all 31 playlists)
 - [ ] ISRC enrichment (Deezer track details have ISRCs — never fetched)
 - [ ] Genre/tag enrichment (Last.fm tags, Deezer album genres)
 - [ ] Resolve pending 3,254 match candidates

@@ -27,6 +27,11 @@ class SoundCloudCollector:
         self._oauth_token = os.environ["SOUNDCLOUD_OAUTH_TOKEN"]
         self._client_id = os.environ["SOUNDCLOUD_CLIENT_ID"]
         self._session.headers["Authorization"] = f"OAuth {self._oauth_token}"
+        self._session.headers["User-Agent"] = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        )
 
         if rate_limiter is None:
             settings = load_settings()
