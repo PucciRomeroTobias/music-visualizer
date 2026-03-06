@@ -44,6 +44,11 @@ class VizFilterConfig:
         "CDj (Conor mulvihill)",
     ])
 
+    # ── Relevance filter (exclude playlists by tier) ──────────
+    # Playlists with relevance_tier > max_tier are excluded from
+    # graph construction. None = no filter (include all).
+    max_tier: int | None = None
+
 
 # ── Preset configurations ────────────────────────────────────────
 
