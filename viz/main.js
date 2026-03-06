@@ -19,22 +19,34 @@ const COMMUNITY_COLORS = [
   "#0ea5e9", // sky
 ];
 
-const ROSA_NEON = "#aa23b1";
 const BG_COLOR = "#06030b";
 
 // === State ===
 let graphData = null;
 let graph = null;
 let selectedNode = null;
+let selectedNeighborIds = new Set();
 const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
-// How many top nodes get permanent labels
-const LABEL_TOP_N = isMobile ? 30 : 80;
+// === Performance profile ===
+const PERF = {
+  bloom: !isMobile,
+  bloomStrength: isMobile ? 0 : 1.2,
+  nodeResolution: isMobile ? 3 : 6,
+  labelTopN: isMobile ? 15 : 60,
+  linkDefaultVisible: !isMobile,
+};
 
 // === Node indexes ===
 const nodeById = new Map();
 const neighborMap = new Map(); // nodeId -> [{node, weight}]
 let labelledNodeIds = new Set(); // top N nodes that get permanent labels
+
+// === Sprite cache (Step 2) ===
+const spriteCache = new Map(); // nodeId -> SpriteText
+
+// === Tracks lazy cache (Step 5) ===
+let tracksData = null; // loaded on first click
 
 // === Load data ===
 async function init() {
@@ -56,13 +68,32 @@ async function init() {
 
   // Determine top N nodes by playlist count for permanent labels
   const sorted = [...graphData.nodes].sort((a, b) => b.playlists - a.playlists);
-  labelledNodeIds = new Set(sorted.slice(0, LABEL_TOP_N).map((n) => n.id));
+  labelledNodeIds = new Set(sorted.slice(0, PERF.labelTopN).map((n) => n.id));
+
+  // Step 1: Pre-compute fixed positions from exported layout
+  const SPREAD = 2.0;
+  for (const node of graphData.nodes) {
+    node.fx = (node.x - 500) * SPREAD;
+    node.fy = (node.y - 500) * SPREAD;
+    node.fz =
+      ((node.community * 73) % 11 - 5) * 40 +
+      (hashCode(node.name) % 100 - 50) * 0.5;
+  }
 
   createGraph();
   buildLegend();
   setupSearch();
   setupDetailPanel();
   hideLoading();
+}
+
+// === Simple string hash for z-spread ===
+function hashCode(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
 }
 
 // === Create 3D graph ===
@@ -75,6 +106,10 @@ function createGraph() {
   const minPlaylists = Math.min(...playlistCounts);
   const playlistRange = maxPlaylists - minPlaylists || 1;
 
+  // Store for sprite positioning
+  createGraph._minPlaylists = minPlaylists;
+  createGraph._playlistRange = playlistRange;
+
   graph = ForceGraph3D()(container)
     .graphData(graphData)
     .backgroundColor(BG_COLOR)
@@ -83,54 +118,62 @@ function createGraph() {
       const normalized = ((n.playlists || 1) - minPlaylists) / playlistRange;
       return 1 + normalized * 7;
     })
-    .nodeColor((n) => COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length])
+    .nodeColor((n) => {
+      if (!selectedNode) {
+        return COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length];
+      }
+      if (n.id === selectedNode.id) {
+        return "#ffffff"; // selected node: white
+      }
+      if (selectedNeighborIds.has(n.id)) {
+        return COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length];
+      }
+      return "#1a1020"; // dimmed
+    })
     .nodeOpacity(0.85)
-    .nodeResolution(isMobile ? 4 : 8)
+    .nodeResolution(PERF.nodeResolution)
     .nodeLabel("")
     // Extend default sphere with text label for top nodes
     .nodeThreeObjectExtend(true)
     .nodeThreeObject((node) => {
-      if (!labelledNodeIds.has(node.id)) return false;
-      const sprite = new SpriteText(node.name.toUpperCase());
-      sprite.color = "#ffffff";
-      sprite.backgroundColor = "rgba(6, 3, 11, 0.6)";
-      sprite.padding = 1;
-      sprite.borderRadius = 2;
-      sprite.fontFace = "Inter, system-ui, sans-serif";
-      sprite.fontSize = 90;
-      sprite.textHeight = 4;
-      sprite.fontWeight = "bold";
-      // Position above the node sphere
-      const nodeSize = 1 + (((node.playlists || 1) - minPlaylists) / playlistRange) * 7;
-      sprite.position.set(0, Math.cbrt(nodeSize) * 3 + 3, 0);
-      return sprite;
+      return getOrCreateSprite(node);
     })
-    // Links: minimal and fast
-    .linkColor(() => "rgba(170, 35, 177, 0.07)")
-    .linkWidth(0)
+    // Step 3a: Link visibility — hide unrelated links
+    .linkVisibility((link) => {
+      if (!selectedNode) return PERF.linkDefaultVisible;
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      return src === selectedNode.id || tgt === selectedNode.id;
+    })
+    .linkColor((link) => {
+      if (!selectedNode) return "rgba(170, 35, 177, 0.07)";
+      const color =
+        COMMUNITY_COLORS[selectedNode.community % COMMUNITY_COLORS.length];
+      return color + "80"; // 50% opacity hex
+    })
+    .linkWidth((link) => {
+      if (!selectedNode) return 0;
+      return Math.sqrt(link.weight) * 2;
+    })
     .linkOpacity(0.3)
     // No particles by default (huge perf win)
     .linkDirectionalParticles(0)
     .onNodeClick(handleNodeClick)
     .onBackgroundClick(handleBackgroundClick)
-    // Performance: pre-compute layout, then freeze
-    .warmupTicks(200)
-    .cooldownTicks(0)
-    // Weaker forces for faster convergence
-    .d3VelocityDecay(0.3);
+    // Step 1: No force simulation — positions are pre-computed
+    .warmupTicks(0)
+    .cooldownTicks(0);
 
-  // Tune forces for better cluster separation
-  graph.d3Force("charge").strength(-30).distanceMax(300);
-  graph.d3Force("link").distance(30).strength(0.1);
-
-  // Bloom post-processing (neon glow)
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    isMobile ? 0.6 : 1.2, // strength
-    0.4, // radius
-    0.85 // threshold
-  );
-  graph.postProcessingComposer().addPass(bloomPass);
+  // Step 4: Bloom only on desktop
+  if (PERF.bloom) {
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      PERF.bloomStrength, // strength
+      0.4, // radius
+      0.85 // threshold
+    );
+    graph.postProcessingComposer().addPass(bloomPass);
+  }
 
   // Responsive resize
   window.addEventListener("resize", () => {
@@ -138,10 +181,73 @@ function createGraph() {
   });
 }
 
+// === Step 2: Sprite cache ===
+function getOrCreateSprite(node) {
+  const isSelected = selectedNode && node.id === selectedNode.id;
+  const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
+  const hasLabel = labelledNodeIds.has(node.id);
+
+  // No label needed — remove from cache if it was a temporary neighbor label
+  if (!hasLabel && !isSelected && !isNeighbor) {
+    spriteCache.delete(node.id);
+    return false;
+  }
+
+  let sprite = spriteCache.get(node.id);
+  if (!sprite) {
+    sprite = new SpriteText(node.name.toUpperCase());
+    sprite.fontFace = "Inter, system-ui, sans-serif";
+    sprite.fontSize = 90;
+    sprite.fontWeight = "bold";
+    sprite.borderRadius = 2;
+    sprite.padding = 1;
+    spriteCache.set(node.id, sprite);
+  }
+
+  // Update visual properties (cheap — no canvas recreation if text unchanged)
+  if (isSelected) {
+    sprite.color = "#ffffff";
+    sprite.backgroundColor = "rgba(170, 35, 177, 0.7)";
+    sprite.textHeight = 5;
+  } else if (isNeighbor) {
+    sprite.color = "rgba(255, 255, 255, 0.85)";
+    sprite.backgroundColor = "rgba(6, 3, 11, 0.7)";
+    sprite.textHeight = 3.5;
+  } else if (selectedNode) {
+    // Permanent label but not related — dim it
+    sprite.color = "rgba(255, 255, 255, 0.15)";
+    sprite.backgroundColor = "rgba(6, 3, 11, 0.3)";
+    sprite.textHeight = 4;
+  } else {
+    sprite.color = "#ffffff";
+    sprite.backgroundColor = "rgba(6, 3, 11, 0.6)";
+    sprite.textHeight = 4;
+  }
+
+  const minPlaylists = createGraph._minPlaylists;
+  const playlistRange = createGraph._playlistRange;
+  const nodeSize =
+    1 + (((node.playlists || 1) - minPlaylists) / playlistRange) * 7;
+  sprite.position.set(0, Math.cbrt(nodeSize) * 3 + 3, 0);
+  return sprite;
+}
+
 // === Interactions ===
 function handleNodeClick(node) {
   if (!node) return;
   selectedNode = node;
+
+  // Build neighbor set for highlighting
+  const neighbors = neighborMap.get(node.id) || [];
+  selectedNeighborIds = new Set(neighbors.map((n) => n.node?.id).filter(Boolean));
+
+  // Refresh visual state
+  graph.nodeColor(graph.nodeColor());
+  graph.linkVisibility(graph.linkVisibility());
+  graph.linkColor(graph.linkColor());
+  graph.linkWidth(graph.linkWidth());
+  graph.nodeThreeObject(graph.nodeThreeObject());
+
   showDetail(node);
 
   // Focus camera on node
@@ -161,18 +267,38 @@ function handleNodeClick(node) {
 
 function handleBackgroundClick() {
   selectedNode = null;
+  selectedNeighborIds = new Set();
+
+  // Restore visual state
+  graph.nodeColor(graph.nodeColor());
+  graph.linkVisibility(graph.linkVisibility());
+  graph.linkColor(graph.linkColor());
+  graph.linkWidth(graph.linkWidth());
+  graph.nodeThreeObject(graph.nodeThreeObject());
+
   hideDetail();
 }
 
 // === Detail panel ===
 function setupDetailPanel() {
   document.getElementById("detail-close").addEventListener("click", () => {
-    selectedNode = null;
-    hideDetail();
+    handleBackgroundClick();
   });
 }
 
-function showDetail(node) {
+// Step 5: Lazy-load tracks
+async function loadTracks() {
+  if (tracksData) return tracksData;
+  try {
+    const res = await fetch("./data/graph_tracks.json");
+    tracksData = await res.json();
+  } catch {
+    tracksData = {};
+  }
+  return tracksData;
+}
+
+async function showDetail(node) {
   // Use stored copy since 3d-force-graph strips custom fields from node objects
   const data = nodeById.get(node.id) || node;
 
@@ -204,10 +330,13 @@ function showDetail(node) {
   document.getElementById("detail-playlists").textContent = data.playlists ?? 0;
   document.getElementById("detail-track-count").textContent = data.trackCount ?? 0;
 
-  // Tracks
+  // Tracks — lazy load from sidecar
   const tracksList = document.getElementById("detail-tracks");
+  tracksList.innerHTML = "<li>Loading...</li>";
+  const tracks = await loadTracks();
+  const nodeTracks = (tracks[data.id] || []).slice(0, 10);
   tracksList.innerHTML = "";
-  for (const t of (data.tracks || []).slice(0, 10)) {
+  for (const t of nodeTracks) {
     const li = document.createElement("li");
     li.innerHTML = `${escapeHtml(t.title)}<span class="track-platform">${t.platform}</span>`;
     tracksList.appendChild(li);

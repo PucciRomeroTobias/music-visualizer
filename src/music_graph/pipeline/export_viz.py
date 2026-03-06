@@ -232,14 +232,16 @@ def export_visualization_json(
 
     # Build nodes array
     nodes = []
+    tracks_sidecar: dict[int, list[dict]] = {}
     for uid in node_ids:
         node_data = G.nodes[uid]
         connections = G.degree(uid)
         playlist_count = artist_playlist_counts.get(uid, 0)
         track_count = artist_track_counts.get(uid, 0)
         pos = positions.get(uid, (500, 500))
+        int_id = uuid_to_int[uid]
         nodes.append({
-            "id": uuid_to_int[uid],
+            "id": int_id,
             "name": node_data.get("label", "Unknown"),
             "x": round(pos[0], 1),
             "y": round(pos[1], 1),
@@ -248,8 +250,10 @@ def export_visualization_json(
             "playlists": playlist_count,
             "trackCount": track_count,
             "platforms": artist_platforms.get(uid, []),
-            "tracks": artist_tracks.get(uid, []),
         })
+        node_tracks = artist_tracks.get(uid, [])
+        if node_tracks:
+            tracks_sidecar[int_id] = node_tracks
 
     # Build links array
     links = []
@@ -286,13 +290,20 @@ def export_visualization_json(
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
 
+    # Write tracks sidecar (lazy-loaded by viz)
+    tracks_path = output_path.parent / "graph_tracks.json"
+    with open(tracks_path, "w", encoding="utf-8") as f:
+        json.dump(tracks_sidecar, f, ensure_ascii=False)
+
     size_mb = output_path.stat().st_size / (1024 * 1024)
+    tracks_size_mb = tracks_path.stat().st_size / (1024 * 1024)
     logger.info(
-        "Exported viz JSON: {} nodes, {} edges, {} communities ({:.1f} MB)",
+        "Exported viz JSON: {} nodes, {} edges, {} communities ({:.1f} MB + {:.1f} MB tracks)",
         len(nodes),
         len(links),
         len(communities_summary),
         size_mb,
+        tracks_size_mb,
     )
 
     return {

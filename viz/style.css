@@ -156,31 +156,37 @@ body {
 /* === Detail panel === */
 #detail-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  width: 360px;
-  height: 100vh;
+  bottom: 16px;
+  right: 16px;
+  width: 25vw;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 45vh;
   background: var(--panel-bg);
-  border-left: 1px solid var(--panel-border);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
   z-index: 200;
-  padding: 24px;
+  padding: 14px 16px;
   overflow-y: auto;
-  transform: translateX(0);
-  transition: transform 0.3s ease;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 #detail-panel.hidden {
-  transform: translateX(100%);
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
 }
 
 #detail-close {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 10px;
+  right: 10px;
   background: none;
   border: none;
   color: var(--gris-claro);
-  font-size: 24px;
+  font-size: 18px;
   cursor: pointer;
   line-height: 1;
 }
@@ -190,21 +196,20 @@ body {
 }
 
 #detail-name {
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: #fff;
-  margin-bottom: 8px;
-  margin-right: 32px;
-  text-shadow: 0 0 8px var(--rosa-neon), 0 0 12px var(--rosa-neon),
-    0 0 16px var(--violeta-medio);
+  margin-bottom: 4px;
+  margin-right: 24px;
+  text-shadow: 0 0 8px var(--rosa-neon), 0 0 12px var(--rosa-neon);
 }
 
 #detail-platforms {
   display: flex;
-  gap: 6px;
-  margin-bottom: 20px;
+  gap: 4px;
+  margin-bottom: 10px;
 }
 
 .platform-badge {
@@ -236,9 +241,9 @@ body {
 
 .detail-stats {
   display: flex;
-  gap: 16px;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -248,35 +253,34 @@ body {
 }
 
 .stat-value {
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 700;
   color: #fff;
 }
 
 .stat-label {
-  font-size: 9px;
-  letter-spacing: 0.15em;
+  font-size: 8px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--rosa-neon);
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .detail-section {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .detail-label {
-  font-size: 10px;
-  letter-spacing: 0.15em;
+  font-size: 9px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--rosa-neon);
-  margin-bottom: 6px;
-  text-shadow: 0 0 6px rgba(170, 35, 177, 0.4);
+  margin-bottom: 4px;
 }
 
 #detail-community,
 #detail-degree {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 #detail-tracks,
@@ -287,8 +291,8 @@ body {
 
 #detail-tracks li,
 #detail-neighbors li {
-  padding: 4px 0;
-  font-size: 12px;
+  padding: 3px 0;
+  font-size: 11px;
   border-bottom: 1px solid rgba(170, 35, 177, 0.08);
 }
 
@@ -364,20 +368,9 @@ body {
   }
 
   #detail-panel {
-    top: auto;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: 55vh;
-    border-left: none;
-    border-top: 1px solid var(--panel-border);
-    border-radius: 16px 16px 0 0;
-    transform: translateY(0);
-  }
-
-  #detail-panel.hidden {
-    transform: translateY(100%);
+    width: 260px;
+    max-height: 40vh;
+    padding: 12px 14px;
   }
 }
 
