@@ -107,15 +107,15 @@ def _compute_community_layout(
     G: nx.Graph,
     communities: list[set[str]],
     node_community: dict[str, int],
-) -> dict[str, tuple[float, float]]:
-    """Compute community-aware 2D layout.
+) -> dict[str, tuple[float, float, float]]:
+    """Compute community-aware 3D layout.
 
     Two-level approach:
-    1. Layout community centers via a meta-graph (unweighted, high repulsion).
-    2. Layout nodes within each community using weighted spring_layout.
-    3. Combine and normalize to [0, 1000].
+    1. Layout community centers via a meta-graph in 3D (unweighted, high repulsion).
+    2. Layout nodes within each community using weighted spring_layout in 3D.
+    3. Combine and normalize to [0, 1000] in all three axes.
     """
-    logger.info("Computing community-aware 2D layout...")
+    logger.info("Computing community-aware 3D layout...")
 
     # Step 1: Build meta-graph (one node per community)
     meta_graph = nx.Graph()
@@ -134,9 +134,9 @@ def _compute_community_layout(
             else:
                 meta_graph.add_edge(cu, cv, weight=d.get("weight", 1))
 
-    # Step 2: Layout meta-graph (unweighted so big communities don't collapse)
+    # Step 2: Layout meta-graph in 3D
     meta_pos = nx.spring_layout(
-        meta_graph, weight=None, iterations=200, seed=42, k=3.0
+        meta_graph, weight=None, iterations=200, seed=42, k=3.0, dim=3
     )
 
     # Spread centers wide so communities don't overlap
@@ -146,41 +146,51 @@ def _compute_community_layout(
             community_radii[idx] = math.sqrt(len(nodes_in_g)) * 0.04
 
     for idx in meta_pos:
-        mx, my = meta_pos[idx]
-        meta_pos[idx] = (mx * 4.0, my * 4.0)
+        mx, my, mz = meta_pos[idx]
+        meta_pos[idx] = (mx * 4.0, my * 4.0, mz * 4.0)
 
-    # Step 3: Layout nodes within each community locally
-    positions: dict[str, tuple[float, float]] = {}
+    # Step 3: Layout nodes within each community locally in 3D
+    positions: dict[str, tuple[float, float, float]] = {}
     for idx, nodes_in_g in enumerate(community_nodes_in_g):
         if not nodes_in_g:
             continue
-        center = meta_pos.get(idx, (0.0, 0.0))
+        center = meta_pos.get(idx, (0.0, 0.0, 0.0))
         if len(nodes_in_g) == 1:
             positions[nodes_in_g[0]] = center
             continue
 
         sub = G.subgraph(nodes_in_g)
-        local_pos = nx.spring_layout(sub, weight="weight", iterations=80, seed=42)
+        local_pos = nx.spring_layout(
+            sub, weight="weight", iterations=80, seed=42, dim=3
+        )
 
         radius = community_radii.get(idx, 0.1)
-        cx, cy = center
+        cx, cy, cz = center
         for node in local_pos:
-            lx, ly = local_pos[node]
-            positions[node] = (cx + lx * radius, cy + ly * radius)
+            lx, ly, lz = local_pos[node]
+            positions[node] = (
+                cx + lx * radius,
+                cy + ly * radius,
+                cz + lz * radius,
+            )
 
     logger.info("Community layout computed ({} communities)", len(communities))
 
-    # Normalize to [0, 1000]
+    # Normalize to [0, 1000] in all three axes
     xs = [p[0] for p in positions.values()]
     ys = [p[1] for p in positions.values()]
+    zs = [p[2] for p in positions.values()]
     x_min, x_max = min(xs), max(xs)
     y_min, y_max = min(ys), max(ys)
+    z_min, z_max = min(zs), max(zs)
     x_range = x_max - x_min or 1
     y_range = y_max - y_min or 1
+    z_range = z_max - z_min or 1
     for uid in positions:
         positions[uid] = (
             (positions[uid][0] - x_min) / x_range * 1000,
             (positions[uid][1] - y_min) / y_range * 1000,
+            (positions[uid][2] - z_min) / z_range * 1000,
         )
 
     return positions
@@ -253,13 +263,14 @@ def export_visualization_json(
         connections = G.degree(uid)
         playlist_count = artist_playlist_counts.get(uid, 0)
         track_count = artist_track_counts.get(uid, 0)
-        pos = positions.get(uid, (500, 500))
+        pos = positions.get(uid, (500, 500, 500))
         int_id = uuid_to_int[uid]
         nodes.append({
             "id": int_id,
             "name": node_data.get("label", "Unknown"),
             "x": round(pos[0], 1),
             "y": round(pos[1], 1),
+            "z": round(pos[2], 1),
             "community": node_community.get(uid, 0),
             "connections": connections,
             "playlists": playlist_count,

@@ -36,6 +36,14 @@ class VizFilterConfig:
     min_degree: int = 3
     min_tracks: int = 0
 
+    # ── Blocklist: non-artist entities (labels, magazines, junk) ──
+    blocklist_names: list[str] = field(default_factory=lambda: [
+        "djmag",
+        "VERKNIPT",
+        "BassTon",
+        "CDj (Conor mulvihill)",
+    ])
+
 
 # ── Preset configurations ────────────────────────────────────────
 
@@ -93,6 +101,17 @@ def filter_graph(
     """
     initial_nodes = G.number_of_nodes()
     initial_edges = G.number_of_edges()
+
+    # 0. Remove blocklisted entities (labels, magazines, junk accounts)
+    if config.blocklist_names:
+        blocklist_lower = {name.lower() for name in config.blocklist_names}
+        blocked = [
+            n for n in G.nodes()
+            if G.nodes[n].get("label", "").lower() in blocklist_lower
+        ]
+        if blocked:
+            G.remove_nodes_from(blocked)
+            logger.info("Removed {} blocklisted entities", len(blocked))
 
     # 1. Remove artists with too few tracks
     if config.min_tracks > 0:

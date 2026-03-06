@@ -1,29 +1,31 @@
 import ForceGraph3D from "3d-force-graph";
 import SpriteText from "three-spritetext";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { AfterimagePass } from "three/examples/jsm/postprocessing/AfterimagePass.js";
 import * as THREE from "three";
 
 // === Color palette ===
 const COMMUNITY_COLORS = [
-  "#aa23b1", // rosa-neon (primary)
-  "#06b6d4", // cyan
-  "#f97316", // orange neon
-  "#22d3ee", // electric blue
+  "#c02deb", // violeta neón (primary)
+  "#65edfa", // cian eléctrico
+  "#f000d8", // rosa neón
   "#a855f7", // purple
-  "#14b8a6", // teal
-  "#f43f5e", // rose
-  "#eab308", // yellow
-  "#6366f1", // indigo
-  "#84cc16", // lime
-  "#ec4899", // pink
-  "#0ea5e9", // sky
+  "#22d3ee", // electric blue
+  "#e040fb", // magenta
+  "#7c4dff", // deep purple
+  "#18ffff", // cyan bright
+  "#ea80fc", // pink light
+  "#b388ff", // lavender
+  "#84ffff", // teal bright
+  "#d500f9", // purple accent
 ];
 
-const BG_COLOR = "#06030b";
+const BG_COLOR = "#000000";
+const SPREAD = 5.0;
 
 // === State ===
 let graphData = null;
-let graph = null;
+let graph = null; // also exposed as window._graph for debugging
 let selectedNode = null;
 let selectedNeighborIds = new Set();
 const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -31,8 +33,8 @@ const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 // === Performance profile ===
 const PERF = {
   bloom: !isMobile,
-  bloomStrength: isMobile ? 0 : 1.2,
-  nodeResolution: isMobile ? 3 : 6,
+  bloomStrength: isMobile ? 0 : 0.8,
+  nodeResolution: isMobile ? 8 : 16,
   labelTopN: isMobile ? 15 : 60,
   linkDefaultVisible: false,
 };
@@ -70,23 +72,11 @@ async function init() {
   const sorted = [...graphData.nodes].sort((a, b) => b.playlists - a.playlists);
   labelledNodeIds = new Set(sorted.slice(0, PERF.labelTopN).map((n) => n.id));
 
-  // Step 1: Pre-compute fixed positions from exported layout
-  const SPREAD = 2.0;
-  // Compute community centers in Z using golden angle for max separation
-  const communityCount = (graphData.communities || []).length || 1;
-  const PHI = (1 + Math.sqrt(5)) / 2;
-  const communityZ = {};
-  for (let i = 0; i < communityCount; i++) {
-    communityZ[i] = ((i * PHI) % 1 - 0.5) * 2; // normalized to [-1, 1]
-  }
-
+  // Step 1: Pre-compute fixed positions from exported 3D layout
   for (const node of graphData.nodes) {
     node.fx = (node.x - 500) * SPREAD;
     node.fy = (node.y - 500) * SPREAD;
-    // Z: community layer (±500) + per-node jitter (±150)
-    const cz = (communityZ[node.community] || 0) * 500;
-    const jitter = (hashCode(node.name) % 1000 - 500) * 0.3;
-    node.fz = cz + jitter;
+    node.fz = ((node.z || 500) - 500) * SPREAD;
   }
 
   createGraph();
@@ -105,27 +95,63 @@ function hashCode(str) {
   return Math.abs(hash);
 }
 
+// === Node object builder (emissive sphere + label) ===
+function buildNodeObject(node) {
+  const isSelected = selectedNode && node.id === selectedNode.id;
+  const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
+
+  // Sphere size from nodeVal formula
+  const t = node.trackCount || 1;
+  const val = Math.pow(Math.log(t + 1), 2);
+  const radius = Math.cbrt(val) * 2.5;
+
+  // Color
+  let color;
+  if (!selectedNode) {
+    color = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
+  } else if (isSelected) {
+    color = "#ffffff";
+  } else if (isNeighbor) {
+    color = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
+  } else {
+    color = "#0a0014";
+  }
+
+  const threeColor = new THREE.Color(color);
+  const emissiveIntensity = isSelected ? 2.0 : (selectedNode && !isNeighbor ? 0.1 : 0.6);
+
+  const geometry = new THREE.SphereGeometry(radius, PERF.nodeResolution, PERF.nodeResolution);
+  const material = new THREE.MeshStandardMaterial({
+    color: threeColor,
+    emissive: threeColor,
+    emissiveIntensity: emissiveIntensity,
+    roughness: 0.4,
+    metalness: 0.1,
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+
+  // Add sprite label
+  const sprite = getOrCreateSprite(node);
+  if (sprite) {
+    mesh.add(sprite);
+  }
+
+  return mesh;
+}
+
 // === Create 3D graph ===
 function createGraph() {
   const container = document.getElementById("graph-container");
 
-  // Compute node size range for visual mapping
-  const playlistCounts = graphData.nodes.map((n) => n.playlists || 1);
-  const maxPlaylists = Math.max(...playlistCounts);
-  const minPlaylists = Math.min(...playlistCounts);
-  const playlistRange = maxPlaylists - minPlaylists || 1;
-
-  // Store for sprite positioning
-  createGraph._minPlaylists = minPlaylists;
-  createGraph._playlistRange = playlistRange;
-
   graph = ForceGraph3D()(container)
     .graphData(graphData)
     .backgroundColor(BG_COLOR)
-    // Node sizing: map playlist count to volume (1-8 range)
+    // Node sizing: log scale of track count for visible difference
+    .nodeRelSize(6)
     .nodeVal((n) => {
-      const normalized = ((n.playlists || 1) - minPlaylists) / playlistRange;
-      return 1 + normalized * 7;
+      const t = n.trackCount || 1;
+      return Math.pow(Math.log(t + 1), 2);
     })
     .nodeColor((n) => {
       if (!selectedNode) {
@@ -137,15 +163,15 @@ function createGraph() {
       if (selectedNeighborIds.has(n.id)) {
         return COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length];
       }
-      return "#1a1020"; // dimmed
+      return "#0a0014"; // dimmed
     })
-    .nodeOpacity(0.85)
+    .nodeOpacity(1)
     .nodeResolution(PERF.nodeResolution)
     .nodeLabel("")
-    // Extend default sphere with text label for top nodes
-    .nodeThreeObjectExtend(true)
+    // Custom emissive sphere + label sprite
+    .nodeThreeObjectExtend(false)
     .nodeThreeObject((node) => {
-      return getOrCreateSprite(node);
+      return buildNodeObject(node);
     })
     // Step 3a: Link visibility — hidden by default, show on click
     .linkVisibility((link) => {
@@ -155,7 +181,7 @@ function createGraph() {
       return src === selectedNode.id || tgt === selectedNode.id;
     })
     .linkColor((link) => {
-      if (!selectedNode) return "rgba(170, 35, 177, 0.07)";
+      if (!selectedNode) return "rgba(192, 45, 235, 0.07)";
       const color =
         COMMUNITY_COLORS[selectedNode.community % COMMUNITY_COLORS.length];
       return color + "80"; // 50% opacity hex
@@ -165,13 +191,30 @@ function createGraph() {
       return Math.sqrt(link.weight) * 2;
     })
     .linkOpacity(0.3)
-    // No particles by default (huge perf win)
-    .linkDirectionalParticles(0)
+    .linkCurvature(0.15)
+    .linkCurveRotation(0)
+    // Particles on selected node's links only
+    .linkDirectionalParticles((link) => {
+      if (!selectedNode) return 0;
+      const src = typeof link.source === "object" ? link.source.id : link.source;
+      const tgt = typeof link.target === "object" ? link.target.id : link.target;
+      return (src === selectedNode.id || tgt === selectedNode.id) ? 4 : 0;
+    })
+    .linkDirectionalParticleWidth(1.5)
+    .linkDirectionalParticleSpeed(0.005)
+    .linkDirectionalParticleColor((link) => {
+      if (!selectedNode) return "#c02deb";
+      return COMMUNITY_COLORS[selectedNode.community % COMMUNITY_COLORS.length];
+    })
     .onNodeClick(handleNodeClick)
     .onBackgroundClick(handleBackgroundClick)
     // Step 1: No force simulation — positions are pre-computed
     .warmupTicks(0)
     .cooldownTicks(0);
+
+  // Add ambient light for MeshStandardMaterial
+  const scene = graph.scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
   // Step 4: Bloom only on desktop
   if (PERF.bloom) {
@@ -181,8 +224,90 @@ function createGraph() {
       0.4, // radius
       0.85 // threshold
     );
+    const afterimagePass = new AfterimagePass(0.3);
+    graph.postProcessingComposer().addPass(afterimagePass);
+
     graph.postProcessingComposer().addPass(bloomPass);
   }
+
+  // Limit max zoom-out based on bounding sphere + camera FOV
+  requestAnimationFrame(() => {
+    // 1. Compute bounding sphere center (barycenter)
+    let cx = 0, cy = 0, cz = 0;
+    const N = graphData.nodes.length;
+    for (const n of graphData.nodes) {
+      cx += (n.x - 500) * SPREAD;
+      cy += (n.y - 500) * SPREAD;
+      cz += ((n.z || 500) - 500) * SPREAD;
+    }
+    cx /= N; cy /= N; cz /= N;
+
+    // 2. Compute bounding sphere radius (P90 to ignore outliers)
+    const radii = [];
+    for (const n of graphData.nodes) {
+      const dx = (n.x - 500) * SPREAD - cx;
+      const dy = (n.y - 500) * SPREAD - cy;
+      const dz = ((n.z || 500) - 500) * SPREAD - cz;
+      radii.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+    radii.sort((a, b) => a - b);
+    const radius = radii[Math.floor(radii.length * 0.95)];
+
+    // 3. Camera distance to fit sphere in view: d = r / tan(fov/2)
+    const camera = graph.camera();
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const maxDist = radius / Math.tan(fovRad / 2);
+
+    // 4. Set controls target to barycenter and limit distance
+    const controls = graph.controls();
+    controls.target.set(cx, cy, cz);
+    controls.maxDistance = maxDist;
+    controls.update();
+
+    // 5. Slow idle rotation around the look-at target
+    let isUserInteracting = false;
+    let idleTimer = null;
+    const canvas = graph.renderer().domElement;
+    const startInteraction = () => {
+      isUserInteracting = true;
+      clearTimeout(idleTimer);
+    };
+    const endInteraction = () => {
+      idleTimer = setTimeout(() => { isUserInteracting = false; }, 500);
+    };
+    canvas.addEventListener("mousedown", startInteraction);
+    canvas.addEventListener("wheel", startInteraction);
+    canvas.addEventListener("touchstart", startInteraction);
+    canvas.addEventListener("mouseup", endInteraction);
+    canvas.addEventListener("touchend", endInteraction);
+    canvas.addEventListener("wheel", () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { isUserInteracting = false; }, 500);
+    });
+
+    const rotSpeed = 0.00042;
+    const center = { x: cx, y: cy, z: cz };
+    (function autoRotate() {
+      requestAnimationFrame(autoRotate);
+      if (isUserInteracting) return;
+      const cam = graph.camera();
+      const dx = cam.position.x - center.x;
+      const dz = cam.position.z - center.z;
+      const cos = Math.cos(rotSpeed);
+      const sin = Math.sin(rotSpeed);
+      cam.position.x = center.x + dx * cos - dz * sin;
+      cam.position.z = center.z + dx * sin + dz * cos;
+      cam.lookAt(center.x, center.y, center.z);
+    })();
+
+    // 6. Position camera looking at the barycenter from a nice angle
+    const initDist = maxDist * 0.6;
+    graph.cameraPosition(
+      { x: cx + initDist * 0.5, y: cy + initDist * 0.3, z: cz + initDist * 0.8 },
+      { x: cx, y: cy, z: cz },
+      0 // instant, no animation
+    );
+  });
 
   // Responsive resize
   window.addEventListener("resize", () => {
@@ -216,28 +341,29 @@ function getOrCreateSprite(node) {
   // Update visual properties (cheap — no canvas recreation if text unchanged)
   if (isSelected) {
     sprite.color = "#ffffff";
-    sprite.backgroundColor = "rgba(170, 35, 177, 0.7)";
-    sprite.textHeight = 5;
+    sprite.backgroundColor = "rgba(10, 0, 20, 0.95)";
+    sprite.textHeight = 6;
   } else if (isNeighbor) {
     sprite.color = "rgba(255, 255, 255, 0.85)";
-    sprite.backgroundColor = "rgba(6, 3, 11, 0.7)";
+    sprite.backgroundColor = "rgba(0, 0, 0, 0.7)";
     sprite.textHeight = 3.5;
   } else if (selectedNode) {
     // Permanent label but not related — dim it
     sprite.color = "rgba(255, 255, 255, 0.15)";
-    sprite.backgroundColor = "rgba(6, 3, 11, 0.3)";
+    sprite.backgroundColor = "rgba(0, 0, 0, 0.3)";
     sprite.textHeight = 4;
   } else {
     sprite.color = "#ffffff";
-    sprite.backgroundColor = "rgba(6, 3, 11, 0.6)";
+    sprite.backgroundColor = "rgba(0, 0, 0, 0.6)";
     sprite.textHeight = 4;
   }
 
-  const minPlaylists = createGraph._minPlaylists;
-  const playlistRange = createGraph._playlistRange;
-  const nodeSize =
-    1 + (((node.playlists || 1) - minPlaylists) / playlistRange) * 7;
-  sprite.position.set(0, Math.cbrt(nodeSize) * 3 + 3, 0);
+  const t = node.trackCount || 1;
+  const nodeSize = Math.pow(Math.log(t + 1), 2);
+  const yOffset = isSelected
+    ? Math.cbrt(nodeSize) * 5 + 10
+    : Math.cbrt(nodeSize) * 4 + 6;
+  sprite.position.set(0, yOffset, 0);
   return sprite;
 }
 
@@ -255,12 +381,13 @@ function handleNodeClick(node) {
   graph.linkVisibility(graph.linkVisibility());
   graph.linkColor(graph.linkColor());
   graph.linkWidth(graph.linkWidth());
+  graph.linkDirectionalParticles(graph.linkDirectionalParticles());
   graph.nodeThreeObject(graph.nodeThreeObject());
 
   showDetail(node);
 
   // Focus camera on node
-  const distance = 150;
+  const distance = 500;
   const distRatio =
     1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0);
   graph.cameraPosition(
@@ -278,11 +405,12 @@ function handleBackgroundClick() {
   selectedNode = null;
   selectedNeighborIds = new Set();
 
-  // Restore visual state
+  // Restore visual state (clear particles too)
   graph.nodeColor(graph.nodeColor());
   graph.linkVisibility(graph.linkVisibility());
   graph.linkColor(graph.linkColor());
   graph.linkWidth(graph.linkWidth());
+  graph.linkDirectionalParticles(graph.linkDirectionalParticles());
   graph.nodeThreeObject(graph.nodeThreeObject());
 
   hideDetail();

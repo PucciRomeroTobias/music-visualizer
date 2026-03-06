@@ -1,13 +1,16 @@
 /* === nowarmup graph viz — rave/neon aesthetic === */
 
 :root {
-  --negro-profundo: #06030b;
-  --rosa-neon: #aa23b1;
+  --negro-total: #000000;
+  --blanco-puro: #ffffff;
+  --violeta-neon: #c02deb;
+  --rosa-neon: #f000d8;
+  --cian-electrico: #65edfa;
   --violeta-medio: #361160;
-  --violeta-oscuro: #2e1d35;
+  --violeta-oscuro: #1a0a2e;
   --gris-claro: #aaa1b1;
-  --panel-bg: rgba(6, 3, 11, 0.92);
-  --panel-border: rgba(170, 35, 177, 0.4);
+  --panel-bg: rgba(0, 0, 0, 0.92);
+  --panel-border: rgba(192, 45, 235, 0.4);
 }
 
 /* Font: Eurostile if available, Inter as fallback */
@@ -34,7 +37,7 @@
 }
 
 body {
-  background: var(--negro-profundo);
+  background: var(--negro-total);
   color: var(--gris-claro);
   font-family: "Eurostile", "Inter", system-ui, sans-serif;
   overflow: hidden;
@@ -73,8 +76,8 @@ body {
 }
 
 #search-input:focus {
-  border-color: var(--rosa-neon);
-  box-shadow: 0 0 12px rgba(170, 35, 177, 0.3);
+  border-color: var(--violeta-neon);
+  box-shadow: 0 0 12px rgba(192, 45, 235, 0.3);
 }
 
 #search-input::placeholder {
@@ -101,7 +104,7 @@ body {
   font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(170, 35, 177, 0.1);
+  border-bottom: 1px solid rgba(192, 45, 235, 0.1);
 }
 
 .search-result-item:hover {
@@ -127,9 +130,9 @@ body {
   font-size: 11px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: var(--rosa-neon);
+  color: var(--violeta-neon);
   margin-bottom: 8px;
-  text-shadow: 0 0 8px var(--rosa-neon);
+  text-shadow: 0 0 8px var(--violeta-neon);
 }
 
 .legend-item {
@@ -192,7 +195,7 @@ body {
 }
 
 #detail-close:hover {
-  color: var(--rosa-neon);
+  color: var(--violeta-neon);
 }
 
 #detail-name {
@@ -203,7 +206,7 @@ body {
   color: #fff;
   margin-bottom: 4px;
   margin-right: 24px;
-  text-shadow: 0 0 8px var(--rosa-neon), 0 0 12px var(--rosa-neon);
+  text-shadow: 0 0 8px var(--violeta-neon), 0 0 12px var(--violeta-neon);
 }
 
 #detail-platforms {
@@ -262,7 +265,7 @@ body {
   font-size: 8px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--rosa-neon);
+  color: var(--violeta-neon);
   margin-top: 1px;
 }
 
@@ -274,7 +277,7 @@ body {
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--rosa-neon);
+  color: var(--violeta-neon);
   margin-bottom: 4px;
 }
 
@@ -293,7 +296,7 @@ body {
 #detail-neighbors li {
   padding: 3px 0;
   font-size: 11px;
-  border-bottom: 1px solid rgba(170, 35, 177, 0.08);
+  border-bottom: 1px solid rgba(192, 45, 235, 0.08);
 }
 
 #detail-tracks li .track-platform {
@@ -321,7 +324,7 @@ body {
 #loading {
   position: fixed;
   inset: 0;
-  background: var(--negro-profundo);
+  background: var(--negro-total);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -338,8 +341,8 @@ body {
   font-size: 16px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--rosa-neon);
-  text-shadow: 0 0 8px var(--rosa-neon), 0 0 16px var(--rosa-neon);
+  color: var(--violeta-neon);
+  text-shadow: 0 0 8px var(--violeta-neon), 0 0 16px var(--violeta-neon);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
