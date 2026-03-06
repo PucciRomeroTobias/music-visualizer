@@ -34,8 +34,10 @@ data/
 # Viz build artifacts & deps
 viz/node_modules/
 viz/dist/
+viz/package-lock.json
 viz-sigma/node_modules/
 viz-sigma/dist/
+viz-sigma/package-lock.json
 
 # Viz data (generated)
 viz/public/data/
