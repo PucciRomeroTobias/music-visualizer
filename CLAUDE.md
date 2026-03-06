@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-**music-graph** maps the underground electronic music scene — specifically **bounce, bouncy techno, bouncy trance, donk, UK bounce, hard bounce, scouse house, and neo rave** — by building co-occurrence graphs from playlist data across multiple platforms.
+**music-graph** maps the underground electronic music scene — specifically **bouncy techno, bouncy trance, hard bounce, neo rave, hardgroove, neo trance**, and adjacent sub-genres of **acid techno, hard techno, and psytrance** — by building co-occurrence graphs from playlist data across multiple platforms.
 
 These micro-genres **do not exist as formal categories** in any major platform's taxonomy. They must be discovered through keyword search, playlist co-occurrence, tag aggregation, and artist overlap. This project makes that invisible scene visible.
 
@@ -112,6 +112,11 @@ When adding a new collector or collection method:
 2. Load already-processed state from DB on startup, never rely on in-memory sets alone
 3. Commit after each playlist (not at the end) to avoid losing progress
 4. **Update `docs/collection_log.md`** after the run completes
+
+## User
+
+- SoundCloud username: **tobasso**
+- Reference playlists (ground truth for what "bounce" means in this project): Bouncy Volador, Bouncy Techno 2, HARDGROOVE, Neo Trance, techno lindo
 
 ## Workflow
 
