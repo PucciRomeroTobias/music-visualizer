@@ -34,7 +34,7 @@ const PERF = {
   bloomStrength: isMobile ? 0 : 1.2,
   nodeResolution: isMobile ? 3 : 6,
   labelTopN: isMobile ? 15 : 60,
-  linkDefaultVisible: !isMobile,
+  linkDefaultVisible: false,
 };
 
 // === Node indexes ===
@@ -72,12 +72,21 @@ async function init() {
 
   // Step 1: Pre-compute fixed positions from exported layout
   const SPREAD = 2.0;
+  // Compute community centers in Z using golden angle for max separation
+  const communityCount = (graphData.communities || []).length || 1;
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const communityZ = {};
+  for (let i = 0; i < communityCount; i++) {
+    communityZ[i] = ((i * PHI) % 1 - 0.5) * 2; // normalized to [-1, 1]
+  }
+
   for (const node of graphData.nodes) {
     node.fx = (node.x - 500) * SPREAD;
     node.fy = (node.y - 500) * SPREAD;
-    node.fz =
-      ((node.community * 73) % 11 - 5) * 40 +
-      (hashCode(node.name) % 100 - 50) * 0.5;
+    // Z: community layer (±500) + per-node jitter (±150)
+    const cz = (communityZ[node.community] || 0) * 500;
+    const jitter = (hashCode(node.name) % 1000 - 500) * 0.3;
+    node.fz = cz + jitter;
   }
 
   createGraph();
@@ -138,9 +147,9 @@ function createGraph() {
     .nodeThreeObject((node) => {
       return getOrCreateSprite(node);
     })
-    // Step 3a: Link visibility — hide unrelated links
+    // Step 3a: Link visibility — hidden by default, show on click
     .linkVisibility((link) => {
-      if (!selectedNode) return PERF.linkDefaultVisible;
+      if (!selectedNode) return false;
       const src = typeof link.source === "object" ? link.source.id : link.source;
       const tgt = typeof link.target === "object" ? link.target.id : link.target;
       return src === selectedNode.id || tgt === selectedNode.id;

@@ -322,9 +322,22 @@ class BFSOrchestrator:
                     raw_track, playlist_id=playlist.id, position=i
                 )
 
-                # Fetch artist details for new artists
+                # Fetch artist details and link to track
                 for artist_pid in raw_track.artist_ids:
                     if artist_pid in self._seen_artists:
+                        # Link existing artist to this track
+                        existing_source = self._session.exec(
+                            select(ArtistSource).where(
+                                ArtistSource.platform == self._collector.platform,
+                                ArtistSource.platform_id == artist_pid,
+                            )
+                        ).first()
+                        if existing_source:
+                            artist = self._session.get(
+                                Artist, existing_source.artist_id
+                            )
+                            if artist:
+                                self._ingester.link_track_artist(track, artist)
                         continue
                     self._seen_artists.add(artist_pid)
 

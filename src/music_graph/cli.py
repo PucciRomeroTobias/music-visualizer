@@ -385,8 +385,11 @@ def export_viz(
     min_cooccurrence: int = typer.Option(
         2, "--min-cooccurrence", help="Min co-occurrence count for edges"
     ),
+    max_nodes: int = typer.Option(
+        4000, "--max-nodes", help="Max nodes (auto-tightens min-degree to fit)"
+    ),
     max_edges: int = typer.Option(
-        None, "--max-edges", help="Max edges to include (top by weight)"
+        150000, "--max-edges", help="Max edges to include (top by weight)"
     ),
     min_degree: int = typer.Option(
         3, "--min-degree", help="Min connections to keep a node"
@@ -411,6 +414,7 @@ def export_viz(
     else:
         config = VizFilterConfig(
             min_cooccurrence=min_cooccurrence,
+            max_nodes=max_nodes,
             max_edges=max_edges,
             min_degree=min_degree,
             min_tracks=min_tracks,
@@ -428,6 +432,53 @@ def export_viz(
         f"Exported: {result['nodes']} nodes, {result['edges']} edges, "
         f"{result['communities']} communities → {output}"
     )
+
+
+@app.command("repair-links")
+def repair_links() -> None:
+    """Repair missing TrackArtist links by matching track.canonical_artist_name to artist.canonical_name."""
+    from sqlmodel import func, select
+
+    from music_graph.db import get_engine, get_session
+    from music_graph.matching.normalize import normalize_name
+    from music_graph.models.artist import Artist
+    from music_graph.models.track import Track, TrackArtist
+
+    engine = get_engine()
+    with get_session(engine) as session:
+        # Build a lookup: normalized artist name -> Artist
+        all_artists = session.exec(select(Artist)).all()
+        artist_lookup: dict[str, Artist] = {}
+        for artist in all_artists:
+            normalized = normalize_name(artist.canonical_name)
+            artist_lookup[normalized] = artist
+
+        # Find all tracks that lack a TrackArtist link
+        linked_track_ids = select(TrackArtist.track_id).distinct()
+        orphaned_tracks = session.exec(
+            select(Track).where(Track.id.notin_(linked_track_ids))  # type: ignore[union-attr]
+        ).all()
+
+        typer.echo(f"Found {len(orphaned_tracks)} tracks without any TrackArtist link")
+
+        repaired = 0
+        unmatched = 0
+        for track in orphaned_tracks:
+            normalized = normalize_name(track.canonical_artist_name)
+            artist = artist_lookup.get(normalized)
+            if artist:
+                session.add(
+                    TrackArtist(track_id=track.id, artist_id=artist.id)
+                )
+                repaired += 1
+            else:
+                unmatched += 1
+
+        session.commit()
+        typer.echo(
+            f"Repaired {repaired} TrackArtist links, "
+            f"{unmatched} tracks had no matching artist"
+        )
 
 
 @app.command("match-stats")

@@ -51,6 +51,18 @@ def _get_artist_track_counts(session: Session) -> dict[str, int]:
     return counts
 
 
+def _batched_in(
+    session: Session, stmt_fn, ids: set[str], batch_size: int = 500
+) -> list:
+    """Execute a SELECT ... WHERE id IN (...) in batches to avoid SQLite variable limit."""
+    results = []
+    id_list = list(ids)
+    for i in range(0, len(id_list), batch_size):
+        batch = id_list[i : i + batch_size]
+        results.extend(session.exec(stmt_fn(batch)).all())
+    return results
+
+
 def _get_artist_tracks(
     session: Session, max_tracks_per_artist: int = 10
 ) -> dict[str, list[dict]]:
@@ -62,16 +74,19 @@ def _get_artist_tracks(
 
     all_track_ids = {tid for tids in artist_track_ids.values() for tid in tids}
     tracks_by_id: dict[str, Track] = {}
-    for track in session.exec(select(Track).where(Track.id.in_(all_track_ids))).all():
+    for track in _batched_in(
+        session, lambda ids: select(Track).where(Track.id.in_(ids)), all_track_ids
+    ):
         tracks_by_id[track.id] = track
 
-    ts_rows = session.exec(
-        select(TrackSource.track_id, TrackSource.platform).where(
-            TrackSource.track_id.in_(all_track_ids)
-        )
-    ).all()
     track_platforms: dict[str, str] = {}
-    for track_id, platform in ts_rows:
+    for track_id, platform in _batched_in(
+        session,
+        lambda ids: select(TrackSource.track_id, TrackSource.platform).where(
+            TrackSource.track_id.in_(ids)
+        ),
+        all_track_ids,
+    ):
         track_platforms[track_id] = platform.value
 
     result: dict[str, list[dict]] = {}

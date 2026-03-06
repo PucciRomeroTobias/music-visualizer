@@ -225,6 +225,22 @@ def seed_from_artists(
 
             for artist_pid in raw_track.artist_ids:
                 if artist_pid in seen_artists_ids:
+                    # Link existing artist to this track
+                    from music_graph.models.artist import ArtistSource
+                    from music_graph.models.base import SourcePlatform
+
+                    existing_source = session.exec(
+                        select(ArtistSource).where(
+                            ArtistSource.platform == collector.platform,
+                            ArtistSource.platform_id == artist_pid,
+                        )
+                    ).first()
+                    if existing_source:
+                        from music_graph.models.artist import Artist
+
+                        artist = session.get(Artist, existing_source.artist_id)
+                        if artist:
+                            ingester.link_track_artist(track, artist)
                     continue
                 seen_artists_ids.add(artist_pid)
 

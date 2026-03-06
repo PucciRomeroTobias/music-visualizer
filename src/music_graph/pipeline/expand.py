@@ -243,6 +243,17 @@ def _phase3_probe_and_ingest(
 
             for artist_pid in raw_track.artist_ids:
                 if artist_pid in seen_artists:
+                    # Link existing artist to this track
+                    existing_source = session.exec(
+                        select(ArtistSource).where(
+                            ArtistSource.platform == collector.platform,
+                            ArtistSource.platform_id == artist_pid,
+                        )
+                    ).first()
+                    if existing_source:
+                        artist = session.get(Artist, existing_source.artist_id)
+                        if artist:
+                            ingester.link_track_artist(track, artist)
                     continue
                 seen_artists.add(artist_pid)
                 try:
