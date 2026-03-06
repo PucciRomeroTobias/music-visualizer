@@ -32,3 +32,5 @@ class Playlist(SQLModel, table=True):
     collected_at: datetime = Field(default_factory=datetime.utcnow)
     collection_depth: int = Field(default=0)
     tracks_collected: bool = Field(default=False)
+    relevance_tier: int | None = Field(default=None, index=True)
+    relevance_genre: str | None = Field(default=None)

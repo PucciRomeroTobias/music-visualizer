@@ -36,6 +36,11 @@ class VizFilterConfig:
     min_degree: int = 3
     min_tracks: int = 0
 
+    # ── Relevance filter (exclude playlists by tier) ──────────
+    # Playlists with relevance_tier > max_tier are excluded from
+    # graph construction. None = no filter (include all).
+    max_tier: int | None = None
+
 
 # ── Preset configurations ────────────────────────────────────────
 

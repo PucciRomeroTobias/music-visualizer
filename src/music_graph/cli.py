@@ -508,6 +508,82 @@ def match_stats() -> None:
         typer.echo(f"  {entity_type:8s} {status.value:10s} {count}")
 
 
+@app.command("dz-judged")
+def dz_judged(
+    max_minutes: float = typer.Option(
+        15.0, help="Maximum batch duration in minutes"
+    ),
+    playlists_per_keyword: int = typer.Option(
+        25, help="Max playlists per keyword search"
+    ),
+) -> None:
+    """Search Deezer with expanded keywords, filter via BounceJudge (tier 1-2 only)."""
+    from music_graph.db import get_engine, get_session, init_db
+    from music_graph.pipeline.collect_judged import judged_search_deezer
+
+    engine = get_engine()
+    init_db(engine)
+
+    with get_session(engine) as session:
+        result = judged_search_deezer(
+            session,
+            playlists_per_keyword=playlists_per_keyword,
+            max_minutes=max_minutes,
+        )
+
+    typer.echo(f"Batch result: {result}")
+    if result["timed_out"]:
+        typer.echo("Run again to continue where it left off.")
+
+
+@app.command("sc-labels")
+def sc_labels(
+    max_minutes: float = typer.Option(
+        15.0, help="Maximum batch duration in minutes"
+    ),
+) -> None:
+    """Search SoundCloud for known bounce labels and ingest their playlists."""
+    from music_graph.db import get_engine, get_session, init_db
+    from music_graph.pipeline.collect_judged import judged_search_sc_labels
+
+    engine = get_engine()
+    init_db(engine)
+
+    with get_session(engine) as session:
+        result = judged_search_sc_labels(
+            session,
+            max_minutes=max_minutes,
+        )
+
+    typer.echo(f"Batch result: {result}")
+    if result["timed_out"]:
+        typer.echo("Run again to continue where it left off.")
+
+
+@app.command("judge-existing")
+def judge_existing(
+    max_minutes: float = typer.Option(
+        15.0, help="Maximum batch duration in minutes"
+    ),
+) -> None:
+    """Judge existing playlists for bounce relevance (sets tier flag, no deletion)."""
+    from music_graph.db import get_engine, get_session, init_db
+    from music_graph.pipeline.collect_judged import judge_existing_playlists
+
+    engine = get_engine()
+    init_db(engine)
+
+    with get_session(engine) as session:
+        result = judge_existing_playlists(
+            session,
+            max_minutes=max_minutes,
+        )
+
+    typer.echo(f"Result: {result}")
+    if result["timed_out"]:
+        typer.echo("Run again to continue where it left off.")
+
+
 def main() -> None:
     """Entry point."""
     app()

@@ -10,7 +10,7 @@ When evaluating, assign a tier:
 - **Tier 3 (score 3-4)**: Periphery — related electronic music world (trance, hard techno, rave) but not bounce. Still interesting context, not to be rejected outright
 - **Tier 4 (score 0-2)**: Out of scope — completely different world, reject
 
-**IMPORTANT: When in doubt, lean towards accepting (higher tier). Unknown or hard-to-classify content should be given the benefit of the doubt — that's where we discover new things.**
+**IMPORTANT: Be accurate — do NOT inflate scores. Only assign tier 1-2 when you are confident the content matches the genre descriptions. Generic or ambiguous content should be tier 3 (periphery), not tier 2. Reserve tier 2 for playlists where you can identify specific bounce-adjacent artists, labels, or genre markers. "Trance" alone is NOT enough for tier 2 — it must be specifically neo trance, hard trance, eurotrance, or another tier 2 subgenre with clear signals.**
 
 ## Core Genres — Tier 1
 
@@ -149,3 +149,12 @@ Neon Dreams Cologne, DEAD END, Crimsonc9, SONICFLUX, GOTD
 - Contains: hip hop, trap, reggaeton, pop, R&B, country, tech house, deep house
 - Named after mainstream festivals or radio stations
 - Very generic names: "EDM", "Dance Music", "Club Hits"
+
+### Common false positives — DO NOT accept as tier 2
+- **"Trance" alone** → tier 3 at best. Must be specifically "neo trance", "hard trance", "eurotrance", "acid trance" to qualify for tier 2
+- **"Vocal Trance"** → tier 4. Commercial trance, not bounce-adjacent
+- **"Psy Trance" / "Goa Trance"** → tier 3. Different scene entirely unless combined with bounce markers
+- **"Dark Trance" / "Neo-Goth"** → tier 4. Gothic/dark aesthetic, not bounce energy
+- **"80s Hits" / decade compilations** → tier 4. Completely out of scope regardless of track content
+- **"Progressive Trance"** → tier 3-4. Progressive = slow build, antithesis of bounce energy
+- **Playlists with < 5 tracks** → be extra skeptical. Tiny playlists with generic names are likely noise

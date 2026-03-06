@@ -180,6 +180,20 @@ class SoundCloudCollector:
             raw_json=data,
         )
 
+    def search_users(self, query: str, limit: int = 10) -> list[dict]:
+        """Search for users/labels by name. Returns list of {id, username}."""
+        logger.info("Searching SoundCloud users for '{}'", query)
+        data = self._get("search/users", params={"q": query, "limit": limit})
+        users = []
+        for item in data.get("collection", []):
+            users.append({
+                "id": item.get("id"),
+                "username": item.get("username", ""),
+                "playlist_count": item.get("playlist_count", 0),
+            })
+        logger.info("Found {} users for '{}'", len(users), query)
+        return users
+
     def search_tracks(self, query: str, limit: int = 25) -> list[RawTrack]:
         """Search for tracks by keyword."""
         logger.info("Searching SoundCloud tracks for '{}'", query)
