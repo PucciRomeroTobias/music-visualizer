@@ -1,0 +1,19 @@
+{
+  "name": "nowarmup-graph-viz",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.73.4",
+    "three": "^0.170.0",
+    "three-spritetext": "^1.10.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NOWARMUP — Artist Graph</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="graph-container"></div>
+
+    <!-- Search bar -->
+    <div id="search-bar">
+      <input
+        type="text"
+        id="search-input"
+        placeholder="SEARCH ARTIST..."
+        autocomplete="off"
+      />
+      <div id="search-results"></div>
+    </div>
+
+    <!-- Community legend -->
+    <div id="legend">
+      <div class="legend-title">COMMUNITIES</div>
+      <div id="legend-items"></div>
+    </div>
+
+    <!-- Artist detail panel -->
+    <div id="detail-panel" class="hidden">
+      <button id="detail-close">&times;</button>
+      <h2 id="detail-name"></h2>
+      <div id="detail-platforms"></div>
+      <div class="detail-section">
+        <div class="detail-label">COMMUNITY</div>
+        <div id="detail-community"></div>
+      </div>
+      <div class="detail-stats">
+        <div class="stat-item">
+          <div class="stat-value" id="detail-connections"></div>
+          <div class="stat-label">CONNECTIONS</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="detail-playlists"></div>
+          <div class="stat-label">PLAYLISTS</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="detail-track-count"></div>
+          <div class="stat-label">TRACKS</div>
+        </div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-label">TRACKS</div>
+        <ul id="detail-tracks"></ul>
+      </div>
+      <div class="detail-section">
+        <div class="detail-label">CONNECTED ARTISTS</div>
+        <ul id="detail-neighbors"></ul>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading">
+      <div class="loading-text">LOADING GRAPH...</div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
