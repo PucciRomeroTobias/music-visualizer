@@ -111,14 +111,20 @@ def filter_graph(
                     config.min_tracks,
                 )
 
-    # 3. Remove low-degree nodes
+    # 3. Remove low-degree nodes (iterate until stable — removing nodes
+    #    can reduce neighbors' degree below the threshold)
     if config.min_degree > 0:
-        low_degree = [n for n, d in G.degree() if d < config.min_degree]
-        G.remove_nodes_from(low_degree)
-        if low_degree:
+        total_removed = 0
+        while True:
+            low_degree = [n for n, d in G.degree() if d < config.min_degree]
+            if not low_degree:
+                break
+            G.remove_nodes_from(low_degree)
+            total_removed += len(low_degree)
+        if total_removed:
             logger.info(
                 "Removed {} nodes with degree < {}",
-                len(low_degree),
+                total_removed,
                 config.min_degree,
             )
 
