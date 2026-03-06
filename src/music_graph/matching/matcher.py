@@ -12,6 +12,12 @@ from music_graph.models.track import Track, TrackSource
 class EntityMatcher:
     """Matches source records to canonical entities.
 
+    .. deprecated::
+        This class is O(N) over all tracks and does not scale. Use
+        :class:`music_graph.matching.resolver.CrossPlatformResolver` instead,
+        which uses indexed normalized-name lookups and batch processing with
+        time budgets.
+
     Resolution order:
     1. Exact match by platform_id (same source)
     2. ISRC match across platforms

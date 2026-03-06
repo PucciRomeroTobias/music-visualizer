@@ -23,3 +23,20 @@ data/
 .DS_Store
 .playwright-mcp/
 .spotify_cache
+
+# Screenshots (temporary)
+*.png
+
+# Caches
+.cache/
+.claude/
+
+# Viz build artifacts & deps
+viz/node_modules/
+viz/dist/
+viz-sigma/node_modules/
+viz-sigma/dist/
+
+# Viz data (generated)
+viz/public/data/
+viz-sigma/public/data/

@@ -35,14 +35,14 @@ class DeezerCollector:
         """Make a rate-limited GET request to Deezer API."""
         self._limiter.acquire()
         url = f"{BASE_URL}/{endpoint}"
-        resp = self._session.get(url, params=params)
+        resp = self._session.get(url, params=params, timeout=(10, 30))
         data = resp.json()
         if "error" in data:
             error = data["error"]
             if error.get("code") == 4:
                 # Rate limited
                 self._limiter.handle_retry_after()
-                resp = self._session.get(url, params=params)
+                resp = self._session.get(url, params=params, timeout=(10, 30))
                 data = resp.json()
             elif error.get("code") == 800:
                 logger.warning("Deezer resource not found: {}", endpoint)
@@ -138,6 +138,22 @@ class DeezerCollector:
             name=data.get("name", "Unknown"),
             raw_json=data,
         )
+
+    def get_related_artists(self, artist_id: str, limit: int = 20) -> list[RawArtist]:
+        """Get related artists from Deezer."""
+        logger.debug("Fetching related artists for {}", artist_id)
+        data = self._get(f"artist/{artist_id}/related", params={"limit": limit})
+        artists = []
+        for item in data.get("data", []):
+            artists.append(
+                RawArtist(
+                    platform=SourcePlatform.DEEZER,
+                    platform_id=str(item["id"]),
+                    name=item.get("name", "Unknown"),
+                    raw_json=item,
+                )
+            )
+        return artists
 
     def get_album_genres(self, album_id: str) -> list[str]:
         """Get genre names from an album."""

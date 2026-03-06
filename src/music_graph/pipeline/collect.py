@@ -4,9 +4,10 @@ from collections import deque
 from datetime import datetime
 
 from loguru import logger
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from music_graph.collectors.base import AbstractCollector, RawArtist, RawPlaylist, RawTrack
+from music_graph.matching.normalize import normalize_name
 from music_graph.config import load_seeds, load_settings
 from music_graph.models.artist import Artist, ArtistGenre, ArtistSource
 from music_graph.models.base import ArtistRole, SourcePlatform
@@ -96,9 +97,20 @@ class Ingester:
         if existing_source:
             artist = self._session.get(Artist, existing_source.artist_id)
         else:
-            artist = Artist(canonical_name=raw.name)
-            self._session.add(artist)
-            self._session.flush()
+            # Try normalized name match before creating new canonical artist
+            normalized = normalize_name(raw.name)
+            existing = self._session.exec(
+                select(Artist).where(
+                    func.lower(Artist.canonical_name) == normalized
+                )
+            ).first()
+
+            if existing:
+                artist = existing
+            else:
+                artist = Artist(canonical_name=raw.name)
+                self._session.add(artist)
+                self._session.flush()
 
             source = ArtistSource(
                 artist_id=artist.id,

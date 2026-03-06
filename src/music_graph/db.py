@@ -22,7 +22,11 @@ def get_engine(db_path: Path | None = None):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite:///{db_path}"
     logger.debug("Using database at {}", db_path)
-    return create_engine(url, echo=False)
+    return create_engine(
+        url,
+        echo=False,
+        connect_args={"timeout": 30},
+    )
 
 
 def init_db(engine=None) -> None:
