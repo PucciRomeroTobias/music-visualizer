@@ -1,5 +1,6 @@
 """CLI interface for music-graph."""
 
+import json
 from pathlib import Path
 
 import typer
@@ -379,59 +380,69 @@ def match(
 
 @app.command("export-viz")
 def export_viz(
-    output: Path = typer.Option(
-        Path("viz/public/data/graph.json"), help="Output JSON file path"
+    preset: str = typer.Argument(
+        "full-scene",
+        help="Preset name (full-scene, deep-dive, core-only) or 'all' to generate all",
     ),
-    min_cooccurrence: int = typer.Option(
-        2, "--min-cooccurrence", help="Min co-occurrence count for edges"
-    ),
-    max_nodes: int = typer.Option(
-        4000, "--max-nodes", help="Max nodes (auto-tightens min-degree to fit)"
-    ),
-    max_edges: int = typer.Option(
-        150000, "--max-edges", help="Max edges to include (top by weight)"
-    ),
-    min_degree: int = typer.Option(
-        3, "--min-degree", help="Min connections to keep a node"
-    ),
-    min_tracks: int = typer.Option(
-        0, "--min-tracks", help="Min tracks an artist must have"
-    ),
-    preset: str = typer.Option(
-        None, "--preset", help="Filter preset: 'strict' (overrides other flags)"
+    output_dir: Path = typer.Option(
+        Path("viz/public/data"), help="Base output directory"
     ),
 ) -> None:
-    """Export graph data as JSON for visualization."""
+    """Export graph data as JSON for visualization.
+
+    Each preset generates files in output_dir/{preset}/graph.json.
+    A presets.json manifest is written to output_dir/ for the frontend.
+    """
     from music_graph.db import get_engine, get_session
     from music_graph.pipeline.export_viz import export_visualization_json
-    from music_graph.pipeline.viz_filters import (
-        PRESET_STRICT,
-        VizFilterConfig,
-    )
+    from music_graph.pipeline.viz_filters import PRESETS
 
-    if preset == "strict":
-        config = PRESET_STRICT
+    if preset == "all":
+        preset_names = list(PRESETS.keys())
+    elif preset in PRESETS:
+        preset_names = [preset]
     else:
-        config = VizFilterConfig(
-            min_cooccurrence=min_cooccurrence,
-            max_nodes=max_nodes,
-            max_edges=max_edges,
-            min_degree=min_degree,
-            min_tracks=min_tracks,
+        typer.echo(
+            f"Unknown preset '{preset}'. Options: {list(PRESETS.keys())} or 'all'"
         )
+        raise typer.Exit(1)
 
     engine = get_engine()
-    with get_session(engine) as session:
-        result = export_visualization_json(
-            session,
-            output_path=output,
-            config=config,
+    manifest = []
+
+    for name in preset_names:
+        config = PRESETS[name]
+        preset_dir = output_dir / name
+        output_path = preset_dir / "graph.json"
+
+        typer.echo(f"\n── Generating preset: {name} ({config.label}) ──")
+
+        with get_session(engine) as session:
+            result = export_visualization_json(
+                session,
+                output_path=output_path,
+                config=config,
+            )
+
+        manifest.append({
+            "name": config.name,
+            "label": config.label,
+            "nodes": result["nodes"],
+            "edges": result["edges"],
+            "communities": result["communities"],
+        })
+
+        typer.echo(
+            f"  → {result['nodes']} nodes, {result['edges']} edges, "
+            f"{result['communities']} communities"
         )
 
-    typer.echo(
-        f"Exported: {result['nodes']} nodes, {result['edges']} edges, "
-        f"{result['communities']} communities → {output}"
-    )
+    # Write manifest for frontend preset selector
+    manifest_path = output_dir / "presets.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+    typer.echo(f"\nManifest written to {manifest_path}")
 
 
 @app.command("repair-links")

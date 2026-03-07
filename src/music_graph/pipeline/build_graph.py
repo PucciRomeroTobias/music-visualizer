@@ -90,6 +90,7 @@ def build_graph(
     min_cooccurrence: int = 1,
     output_path: Path | None = None,
     export_format: str = "gexf",
+    playlist_ids: set[str] | None = None,
 ) -> nx.Graph:
     """Build a weighted graph from the database.
 
@@ -111,7 +112,11 @@ def build_graph(
         raise ValueError(
             f"Unknown node_type '{node_type}'. Options: {list(PROJECTIONS.keys())}"
         )
-    cooccurrence_raw = project_fn(session)
+    # Pass playlist_ids filter to projection if supported
+    if playlist_ids is not None and node_type == "artist":
+        cooccurrence_raw = project_fn(session, playlist_ids=playlist_ids)
+    else:
+        cooccurrence_raw = project_fn(session)
 
     # Filter by minimum co-occurrence count
     cooccurrence = {
