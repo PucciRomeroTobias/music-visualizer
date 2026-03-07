@@ -21,13 +21,19 @@ const COMMUNITY_COLORS = [
 ];
 
 const BG_COLOR = "#000000";
-const SPREAD = 5.0;
 
 // === State ===
 let graphData = null;
 let graph = null; // also exposed as window._graph for debugging
+let SPREAD = 5.0; // recalculated after data load
 let selectedNode = null;
 let selectedNeighborIds = new Set();
+let hoveredNode = null;
+let selectedCommunity = null; // community id when clicking legend
+let initialCamera = null; // { pos, lookAt } saved after first layout
+let cameraAnimating = false; // true during programmatic camera flights
+let graphRadius = 1000; // bounding sphere radius, set after layout
+let showLabels = false;
 const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
 // === Performance profile ===
@@ -40,7 +46,8 @@ const PERF = {
 };
 
 // === Node indexes ===
-const nodeById = new Map();
+const nodeById = new Map(); // id -> copy of original node (pre-SPREAD)
+const liveNodeById = new Map(); // id -> live node object from graphData (post-SPREAD)
 const neighborMap = new Map(); // nodeId -> [{node, weight}]
 let labelledNodeIds = new Set(); // top N nodes that get permanent labels
 
@@ -50,9 +57,109 @@ const spriteCache = new Map(); // nodeId -> SpriteText
 // === Tracks lazy cache (Step 5) ===
 let tracksData = null; // loaded on first click
 
+// === Deezer preview playback ===
+let previewAudio = null; // current Audio instance
+let previewBtn = null; // current playing button element
+
+function deezerJsonp(deezerId) {
+  return new Promise((resolve, reject) => {
+    const cb = `_dz_${Date.now()}`;
+    const script = document.createElement("script");
+    script.src = `https://api.deezer.com/track/${deezerId}?output=jsonp&callback=${cb}`;
+    const cleanup = () => {
+      delete window[cb];
+      script.remove();
+      clearTimeout(timer);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("JSONP timeout"));
+    }, 10000);
+    window[cb] = (data) => {
+      cleanup();
+      resolve(data);
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("JSONP failed"));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function playDeezerPreview(deezerId, btn) {
+  // If clicking the same button that's playing, toggle pause/play
+  if (previewAudio && previewBtn === btn) {
+    if (previewAudio.paused) {
+      previewAudio.play();
+      btn.textContent = "⏸";
+    } else {
+      previewAudio.pause();
+      btn.textContent = "▶";
+    }
+    return;
+  }
+
+  // Stop any current preview
+  if (previewAudio) {
+    previewAudio.pause();
+    previewAudio = null;
+    if (previewBtn) previewBtn.textContent = "▶";
+  }
+
+  btn.textContent = "…";
+
+  try {
+    const data = await deezerJsonp(deezerId);
+    const previewUrl = data.preview;
+
+    if (!previewUrl) {
+      btn.textContent = "✕";
+      setTimeout(() => (btn.textContent = "▶"), 2000);
+      return;
+    }
+
+    previewAudio = new Audio(previewUrl);
+    previewBtn = btn;
+    btn.textContent = "⏸";
+
+    previewAudio.addEventListener("ended", () => {
+      btn.textContent = "▶";
+      previewAudio = null;
+      previewBtn = null;
+    });
+
+    previewAudio.addEventListener("error", () => {
+      btn.textContent = "✕";
+      setTimeout(() => (btn.textContent = "▶"), 2000);
+      previewAudio = null;
+      previewBtn = null;
+    });
+
+    previewAudio.play();
+  } catch {
+    btn.textContent = "✕";
+    setTimeout(() => (btn.textContent = "▶"), 2000);
+  }
+}
+
+// === Preset handling ===
+let currentPreset = "full-scene";
+
+function getPresetFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("preset") || "full-scene";
+}
+
+function dataPath(file) {
+  return `./data/${currentPreset}/${file}`;
+}
+
 // === Load data ===
 async function init() {
-  const res = await fetch("./data/graph.json");
+  currentPreset = getPresetFromUrl();
+
+  const res = await fetch(dataPath("graph.json"));
   graphData = await res.json();
 
   // Build indexes — store copies since 3d-force-graph mutates node objects
@@ -73,16 +180,22 @@ async function init() {
   labelledNodeIds = new Set(sorted.slice(0, PERF.labelTopN).map((n) => n.id));
 
   // Step 1: Pre-compute fixed positions from exported 3D layout
+  // Scale spread with node count: ~5.0 for 3500 nodes, ~1.5 for 200 nodes
+  SPREAD = Math.max(1.5, Math.sqrt(graphData.nodes.length / 140));
   for (const node of graphData.nodes) {
     node.fx = (node.x - 500) * SPREAD;
     node.fy = (node.y - 500) * SPREAD;
     node.fz = ((node.z || 500) - 500) * SPREAD;
+    liveNodeById.set(node.id, node);
   }
 
   createGraph();
   buildLegend();
   setupSearch();
   setupDetailPanel();
+  setupLabelsToggle();
+  setupResetCamera();
+  setupPresetSelector();
   hideLoading();
 }
 
@@ -138,14 +251,24 @@ function buildNodeObject(node) {
 function updateNodeMaterial(node, mesh) {
   const isSelected = selectedNode && node.id === selectedNode.id;
   const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
+  const isHovered = hoveredNode && node.id === hoveredNode.id;
+  const isCommunityMember = selectedCommunity !== null && node.community === selectedCommunity;
+  // When a node is selected, softly highlight same-community peers
+  const isSameCommunity = selectedNode && !isSelected && !isNeighbor
+    && node.community === selectedNode.community;
   const mat = mesh.material;
 
   let color;
-  if (!selectedNode) {
+  if (selectedCommunity !== null) {
+    // Legend community highlight mode
+    color = isCommunityMember
+      ? COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length]
+      : "#0a0014";
+  } else if (!selectedNode) {
     color = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
   } else if (isSelected) {
     color = "#ffffff";
-  } else if (isNeighbor) {
+  } else if (isNeighbor || isSameCommunity) {
     color = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
   } else {
     color = "#0a0014";
@@ -154,27 +277,43 @@ function updateNodeMaterial(node, mesh) {
   const c = new THREE.Color(color);
   mat.color.copy(c);
   mat.emissive.copy(c);
-  mat.emissiveIntensity = isSelected ? 2.0 : (selectedNode && !isNeighbor ? 0.1 : 0.6);
+
+  let intensity;
+  if (isSelected) intensity = 2.0;
+  else if (isHovered) intensity = 1.5;
+  else if (isNeighbor) intensity = 0.8;
+  else if (isCommunityMember) intensity = 0.8;
+  else if (isSameCommunity) intensity = 0.25;
+  else if (selectedNode || selectedCommunity !== null) intensity = 0.1;
+  else intensity = 0.6;
+  mat.emissiveIntensity = intensity;
+
+  // Scale up on hover for visual feedback
+  const scale = isHovered ? 1.6 : 1.0;
+  mesh.scale.set(scale, scale, scale);
 }
 
 // Fast material-only update for all visible nodes (no mesh recreation)
 function refreshNodeMaterials() {
-  // Only nodes that need sprite updates: labelled, selected, neighbors
-  const spriteNodes = new Set(labelledNodeIds);
-  if (selectedNode) {
-    spriteNodes.add(selectedNode.id);
-    for (const id of selectedNeighborIds) spriteNodes.add(id);
+  // Determine which nodes need sprite updates
+  const updateAll = showLabels;
+  let spriteNodes;
+  if (!updateAll) {
+    spriteNodes = new Set();
+    if (selectedNode) {
+      spriteNodes.add(selectedNode.id);
+      for (const id of selectedNeighborIds) spriteNodes.add(id);
+    }
+    // Also update nodes that HAD sprites before (to remove them)
+    for (const id of spriteCache.keys()) spriteNodes.add(id);
   }
-  // Also update nodes that HAD sprites before (to remove them)
-  for (const id of spriteCache.keys()) spriteNodes.add(id);
 
   for (const node of graphData.nodes) {
     const mesh = meshCache.get(node.id);
     if (!mesh) continue;
     updateNodeMaterial(node, mesh);
 
-    // Only touch sprites for nodes that need them
-    if (spriteNodes.has(node.id)) {
+    if (updateAll || spriteNodes.has(node.id)) {
       for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
       const sprite = getOrCreateSprite(node);
       if (sprite) mesh.add(sprite);
@@ -235,20 +374,9 @@ function createGraph() {
     .linkOpacity(0.3)
     .linkCurvature(0.15)
     .linkCurveRotation(0)
-    // Particles on selected node's links only
-    .linkDirectionalParticles((link) => {
-      if (!selectedNode) return 0;
-      const src = typeof link.source === "object" ? link.source.id : link.source;
-      const tgt = typeof link.target === "object" ? link.target.id : link.target;
-      return (src === selectedNode.id || tgt === selectedNode.id) ? 4 : 0;
-    })
-    .linkDirectionalParticleWidth(1.5)
-    .linkDirectionalParticleSpeed(0.005)
-    .linkDirectionalParticleColor((link) => {
-      if (!selectedNode) return "#c02deb";
-      return COMMUNITY_COLORS[selectedNode.community % COMMUNITY_COLORS.length];
-    })
+    .linkDirectionalParticles(0)
     .onNodeClick(handleNodeClick)
+    .onNodeHover(handleNodeHover)
     .onBackgroundClick(handleBackgroundClick)
     .enableNodeDrag(false)
     // Step 1: No force simulation — positions are pre-computed
@@ -295,6 +423,7 @@ function createGraph() {
     }
     radii.sort((a, b) => a - b);
     const radius = radii[Math.floor(radii.length * 0.95)];
+    graphRadius = radius;
 
     // 3. Camera distance to fit sphere in view: d = r / tan(fov/2)
     const camera = graph.camera();
@@ -332,7 +461,7 @@ function createGraph() {
     const center = { x: cx, y: cy, z: cz };
     (function autoRotate() {
       requestAnimationFrame(autoRotate);
-      if (isUserInteracting) return;
+      if (isUserInteracting || cameraAnimating) return;
       const cam = graph.camera();
       const dx = cam.position.x - center.x;
       const dz = cam.position.z - center.z;
@@ -345,11 +474,10 @@ function createGraph() {
 
     // 6. Position camera looking at the barycenter from a nice angle
     const initDist = maxDist * 0.6;
-    graph.cameraPosition(
-      { x: cx + initDist * 0.5, y: cy + initDist * 0.3, z: cz + initDist * 0.8 },
-      { x: cx, y: cy, z: cz },
-      0 // instant, no animation
-    );
+    const initPos = { x: cx + initDist * 0.5, y: cy + initDist * 0.3, z: cz + initDist * 0.8 };
+    const initLookAt = { x: cx, y: cy, z: cz };
+    graph.cameraPosition(initPos, initLookAt, 0);
+    initialCamera = { pos: { ...initPos }, lookAt: { ...initLookAt } };
   });
 
   // Responsive resize
@@ -362,10 +490,8 @@ function createGraph() {
 function getOrCreateSprite(node) {
   const isSelected = selectedNode && node.id === selectedNode.id;
   const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
-  const hasLabel = labelledNodeIds.has(node.id);
-
-  // No label needed — remove from cache if it was a temporary neighbor label
-  if (!hasLabel && !isSelected && !isNeighbor) {
+  // Show label if: selected, neighbor of selected, or toggle is on (all nodes)
+  if (!isSelected && !isNeighbor && !showLabels) {
     spriteCache.delete(node.id);
     return false;
   }
@@ -381,7 +507,7 @@ function getOrCreateSprite(node) {
     spriteCache.set(node.id, sprite);
   }
 
-  // Update visual properties (cheap — no canvas recreation if text unchanged)
+  // Update visual properties
   if (isSelected) {
     sprite.color = "#ffffff";
     sprite.backgroundColor = "rgba(10, 0, 20, 0.95)";
@@ -394,11 +520,11 @@ function getOrCreateSprite(node) {
     // Permanent label but not related — dim it
     sprite.color = "rgba(255, 255, 255, 0.15)";
     sprite.backgroundColor = "rgba(0, 0, 0, 0.3)";
-    sprite.textHeight = 4;
+    sprite.textHeight = 8;
   } else {
     sprite.color = "#ffffff";
     sprite.backgroundColor = "rgba(0, 0, 0, 0.6)";
-    sprite.textHeight = 4;
+    sprite.textHeight = 8;
   }
 
   const t = node.trackCount || 1;
@@ -410,10 +536,26 @@ function getOrCreateSprite(node) {
   return sprite;
 }
 
+// === Camera flight helper ===
+function flyTo(pos, lookAt, duration = 2000) {
+  cameraAnimating = true;
+  graph.cameraPosition(pos, lookAt, duration);
+  setTimeout(() => {
+    cameraAnimating = false;
+    const controls = graph.controls();
+    controls.target.set(lookAt.x, lookAt.y, lookAt.z);
+    controls.update();
+  }, duration + 100);
+}
+
 // === Interactions ===
 function handleNodeClick(node) {
   if (!node) return;
   selectedNode = node;
+  // Keep selectedCommunity if set (from legend click), clear otherwise
+  if (selectedCommunity !== null && node.community !== selectedCommunity) {
+    selectedCommunity = null;
+  }
 
   // Build neighbor set for highlighting
   const neighbors = neighborMap.get(node.id) || [];
@@ -426,24 +568,69 @@ function handleNodeClick(node) {
 
   showDetail(node);
 
-  // Fly camera to node smoothly
-  const distance = 500;
-  const distRatio =
-    1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0);
-  graph.cameraPosition(
-    {
-      x: (node.x || 0) * distRatio,
-      y: (node.y || 0) * distRatio,
-      z: (node.z || 0) * distRatio,
-    },
-    node,
-    2000 // 2s smooth flight
+  // Fly camera to node — distance proportional to graph size
+  const nx = node.x || 0;
+  const ny = node.y || 0;
+  const nz = node.z || 0;
+  const flyDist = graphRadius * 0.3;
+  flyTo(
+    { x: nx + flyDist * 0.5, y: ny + flyDist * 0.3, z: nz + flyDist * 0.8 },
+    { x: nx, y: ny, z: nz }
   );
+}
+
+let hoverSprite = null; // temporary sprite for hovered node
+
+function handleNodeHover(node) {
+  const prev = hoveredNode;
+  hoveredNode = node || null;
+
+  // Remove hover sprite from previous node
+  if (prev && hoverSprite) {
+    const prevMesh = meshCache.get(prev.id);
+    if (prevMesh) prevMesh.remove(hoverSprite);
+    hoverSprite = null;
+  }
+
+  // Update materials
+  if (prev) {
+    const mesh = meshCache.get(prev.id);
+    if (mesh) updateNodeMaterial(prev, mesh);
+  }
+  if (hoveredNode) {
+    const mesh = meshCache.get(hoveredNode.id);
+    if (mesh) {
+      updateNodeMaterial(hoveredNode, mesh);
+      // Add hover label if no label already showing
+      const isSelected = selectedNode && hoveredNode.id === selectedNode.id;
+      const isNeighbor = selectedNode && selectedNeighborIds.has(hoveredNode.id);
+      if (!isSelected && !isNeighbor && !showLabels) {
+        hoverSprite = new SpriteText(hoveredNode.name.toUpperCase());
+        hoverSprite.fontFace = "Inter, system-ui, sans-serif";
+        hoverSprite.fontSize = 90;
+        hoverSprite.fontWeight = "bold";
+        hoverSprite.color = "#ffffff";
+        hoverSprite.backgroundColor = "rgba(0, 0, 0, 0.7)";
+        hoverSprite.borderRadius = 2;
+        hoverSprite.padding = 1;
+        hoverSprite.textHeight = 5;
+        const t = hoveredNode.trackCount || 1;
+        const nodeSize = Math.pow(Math.log(t + 1), 2);
+        hoverSprite.position.y = Math.cbrt(nodeSize) * 4 + 8;
+        mesh.add(hoverSprite);
+      }
+    }
+  }
+
+  // Pointer cursor
+  const container = document.getElementById("graph-container");
+  container.style.cursor = hoveredNode ? "pointer" : "default";
 }
 
 function handleBackgroundClick() {
   selectedNode = null;
   selectedNeighborIds = new Set();
+  selectedCommunity = null;
 
   // Restore visual state (materials only — no mesh recreation)
   refreshNodeMaterials();
@@ -464,7 +651,7 @@ function setupDetailPanel() {
 async function loadTracks() {
   if (tracksData) return tracksData;
   try {
-    const res = await fetch("./data/graph_tracks.json");
+    const res = await fetch(dataPath("graph_tracks.json"));
     tracksData = await res.json();
   } catch {
     tracksData = {};
@@ -493,11 +680,12 @@ async function showDetail(node) {
   // Community
   const communityIdx = data.community;
   const communityInfo = graphData.communities[communityIdx];
+  const communityName = communityInfo?.name;
   const topArtists = communityInfo
     ? communityInfo.top_artists.slice(0, 3).join(", ")
     : "";
   document.getElementById("detail-community").textContent =
-    `#${communityIdx}` + (topArtists ? ` (${topArtists})` : "");
+    communityName || (`#${communityIdx}` + (topArtists ? ` (${topArtists})` : ""));
 
   // Stats
   document.getElementById("detail-connections").textContent = data.connections ?? 0;
@@ -512,14 +700,22 @@ async function showDetail(node) {
   tracksList.innerHTML = "";
   for (const t of nodeTracks) {
     const li = document.createElement("li");
-    const url = trackUrl(t.platform, t.platformId);
-    if (url) {
-      li.innerHTML = `<a href="${url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a><span class="track-platform">${t.platform}</span>`;
-    } else {
-      li.innerHTML = `${escapeHtml(t.title)}<span class="track-platform">${t.platform}</span>`;
-    }
+    const titleHtml = t.url
+      ? `<a href="${t.url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a>`
+      : escapeHtml(t.title);
+    const playBtn = t.deezerId
+      ? `<button class="track-play" data-deezer-id="${t.deezerId}" title="Preview">▶</button>`
+      : "";
+    li.innerHTML = `${playBtn}${titleHtml}<span class="track-platform">${t.platform}</span>`;
     tracksList.appendChild(li);
   }
+  // Attach play handlers
+  tracksList.querySelectorAll(".track-play").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      playDeezerPreview(btn.dataset.deezerId, btn);
+    });
+  });
 
   // Connected artists (top 10 by weight)
   const neighbors = (neighborMap.get(data.id) || [])
@@ -531,7 +727,10 @@ async function showDetail(node) {
   for (const { node: n, weight } of neighbors) {
     const li = document.createElement("li");
     li.innerHTML = `${escapeHtml(n.name)}<span class="neighbor-weight">${weight.toFixed(3)}</span>`;
-    li.addEventListener("click", () => handleNodeClick(n));
+    li.addEventListener("click", () => {
+      const realNode = liveNodeById.get(n.id);
+      if (realNode) handleNodeClick(realNode);
+    });
     neighborsList.appendChild(li);
   }
 
@@ -599,21 +798,156 @@ function buildLegend() {
   const container = document.getElementById("legend-items");
   const communities = graphData.communities || [];
 
-  const sorted = [...communities].sort((a, b) => b.size - a.size).slice(0, 10);
+  const sorted = [...communities].sort((a, b) => b.size - a.size);
 
   for (const c of sorted) {
     const color = COMMUNITY_COLORS[c.id % COMMUNITY_COLORS.length];
-    const label = c.top_artists.slice(0, 2).join(", ");
+    const label = c.name || c.top_artists.slice(0, 2).join(", ");
 
     const item = document.createElement("div");
     item.className = "legend-item";
     item.innerHTML = `<span class="legend-color" style="background:${color}"></span><span>${escapeHtml(label)} (${c.size})</span>`;
     item.addEventListener("click", () => {
-      const communityNode = graphData.nodes.find((n) => n.community === c.id);
-      if (communityNode) handleNodeClick(communityNode);
+      if (selectedCommunity === c.id) {
+        // Toggle off
+        handleBackgroundClick();
+        return;
+      }
+      // Find the most connected node in this community
+      const communityNodes = graphData.nodes
+        .filter((n) => n.community === c.id)
+        .sort((a, b) => b.connections - a.connections);
+      const topNode = communityNodes[0];
+      if (!topNode) return;
+      selectedCommunity = c.id;
+      handleNodeClick(topNode);
     });
     container.appendChild(item);
   }
+}
+
+// === Preset selector ===
+async function setupPresetSelector() {
+  const wrapper = document.getElementById("preset-selector");
+  if (!wrapper) return;
+  try {
+    const res = await fetch("./data/presets.json");
+    const presets = await res.json();
+    if (presets.length <= 1) { wrapper.style.display = "none"; return; }
+
+    const current = presets.find((p) => p.name === currentPreset) || presets[0];
+    const toggle = wrapper.querySelector(".preset-toggle");
+    const menu = wrapper.querySelector(".preset-menu");
+
+    toggle.textContent = current.label;
+
+    menu.innerHTML = "";
+    for (const p of presets) {
+      const item = document.createElement("button");
+      item.textContent = p.label;
+      item.title = `${p.nodes} artists, ${p.communities} communities`;
+      item.classList.add("preset-item");
+      if (p.name === currentPreset) item.classList.add("active");
+      item.addEventListener("click", () => {
+        if (p.name === currentPreset) { menu.classList.remove("open"); return; }
+        const url = new URL(window.location);
+        url.searchParams.set("preset", p.name);
+        window.location.href = url.toString();
+      });
+      menu.appendChild(item);
+    }
+
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.classList.toggle("open");
+    });
+    document.addEventListener("click", () => menu.classList.remove("open"));
+  } catch {
+    wrapper.style.display = "none";
+  }
+}
+
+// === Reset camera ===
+function setupResetCamera() {
+  document.getElementById("reset-camera").addEventListener("click", () => {
+    if (!initialCamera) return;
+    handleBackgroundClick();
+    flyTo(initialCamera.pos, initialCamera.lookAt);
+  });
+}
+
+// === Labels toggle ===
+let labelBatchId = 0; // incremented to cancel in-flight batches
+
+function setupLabelsToggle() {
+  const btn = document.getElementById("toggle-labels");
+  btn.addEventListener("click", () => {
+    showLabels = !showLabels;
+    btn.classList.toggle("active", showLabels);
+
+    if (!showLabels) {
+      // Remove all at once (cheap — just detach sprites)
+      labelBatchId++;
+      for (const node of graphData.nodes) {
+        const mesh = meshCache.get(node.id);
+        if (!mesh) continue;
+        for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+      }
+      spriteCache.clear();
+      return;
+    }
+
+    // Progressive add: sort by distance to camera, batch in chunks
+    const cam = graph.camera();
+    const camPos = cam.position;
+    const sorted = [...graphData.nodes].sort((a, b) => {
+      const da = (a.fx - camPos.x) ** 2 + (a.fy - camPos.y) ** 2 + (a.fz - camPos.z) ** 2;
+      const db = (b.fx - camPos.x) ** 2 + (b.fy - camPos.y) ** 2 + (b.fz - camPos.z) ** 2;
+      return da - db;
+    });
+
+    const batchSize = 150;
+    const batchId = ++labelBatchId;
+    let idx = 0;
+
+    const fadingSprites = []; // sprites to fade in
+
+    function processBatch() {
+      if (batchId !== labelBatchId) return; // cancelled
+      const end = Math.min(idx + batchSize, sorted.length);
+      for (; idx < end; idx++) {
+        const node = sorted[idx];
+        const mesh = meshCache.get(node.id);
+        if (!mesh) continue;
+        for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+        const sprite = getOrCreateSprite(node);
+        if (sprite) {
+          sprite.material.opacity = 0;
+          sprite.material.transparent = true;
+          mesh.add(sprite);
+          fadingSprites.push(sprite);
+        }
+      }
+      if (idx < sorted.length) {
+        requestAnimationFrame(processBatch);
+      }
+    }
+    requestAnimationFrame(processBatch);
+
+    // Fade in all sprites gradually
+    function fadeIn() {
+      if (batchId !== labelBatchId) return;
+      let allDone = true;
+      for (const s of fadingSprites) {
+        if (s.material.opacity < 1) {
+          s.material.opacity = Math.min(s.material.opacity + 0.15, 1);
+          allDone = false;
+        }
+      }
+      if (!allDone) requestAnimationFrame(fadeIn);
+    }
+    requestAnimationFrame(fadeIn);
+  });
 }
 
 // === Loading ===
@@ -630,15 +964,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function trackUrl(platform, platformId) {
-  if (!platformId) return null;
-  switch (platform) {
-    case "DEEZER": return `https://www.deezer.com/track/${platformId}`;
-    case "SOUNDCLOUD": return `https://soundcloud.com/${platformId}`;
-    case "SPOTIFY": return `https://open.spotify.com/track/${platformId}`;
-    default: return null;
-  }
-}
 
 // === Start ===
 init();

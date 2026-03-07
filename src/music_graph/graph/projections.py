@@ -46,10 +46,17 @@ def project_track_cooccurrence(session: Session) -> dict[tuple[str, str], int]:
     return dict(cooccurrence)
 
 
-def project_artist_cooccurrence(session: Session) -> dict[tuple[str, str], int]:
+def project_artist_cooccurrence(
+    session: Session,
+    playlist_ids: set[str] | None = None,
+) -> dict[tuple[str, str], int]:
     """Build artist co-occurrence from shared playlists.
 
     Edge between artists if their tracks appear in the same playlist.
+
+    Args:
+        session: Database session.
+        playlist_ids: If set, only consider these playlists. None = all.
     """
     logger.info("Projecting artist co-occurrence...")
 
@@ -63,6 +70,8 @@ def project_artist_cooccurrence(session: Session) -> dict[tuple[str, str], int]:
     playlist_tracks = session.exec(select(PlaylistTrack)).all()
     playlists: dict[str, set[str]] = defaultdict(set)
     for pt in playlist_tracks:
+        if playlist_ids is not None and pt.playlist_id not in playlist_ids:
+            continue
         for artist_id in track_to_artists.get(pt.track_id, set()):
             playlists[pt.playlist_id].add(artist_id)
 

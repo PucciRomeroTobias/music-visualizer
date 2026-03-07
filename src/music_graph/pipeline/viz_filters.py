@@ -24,9 +24,16 @@ class VizFilterConfig:
     initial filtering, min_degree is auto-increased until the graph fits.
     """
 
+    # ── Preset identity ───────────────────────────────────────
+    name: str = "default"
+    label: str = "Full Scene"  # human-readable label for the UI
+
     # ── Edge construction (passed to build_graph) ─────────────
     min_cooccurrence: int = 2
     min_weight: float = 0.01
+
+    # ── Community detection ───────────────────────────────────
+    resolution: float = 1.0  # Leiden resolution: >1 = more communities, <1 = fewer
 
     # ── Performance budgets (auto-tighten filters to fit) ─────
     max_nodes: int | None = 4_000
@@ -52,15 +59,33 @@ class VizFilterConfig:
 
 # ── Preset configurations ────────────────────────────────────────
 
-PRESET_DEFAULT = VizFilterConfig()
+PRESETS: dict[str, VizFilterConfig] = {
+    "full-scene": VizFilterConfig(
+        name="full-scene",
+        label="Full Scene",
+        max_tier=3,
+    ),
+    "bounce-focus": VizFilterConfig(
+        name="bounce-focus",
+        label="Bounce Focus",
+        max_tier=2,
+        resolution=2.0,
+    ),
+    "core-only": VizFilterConfig(
+        name="core-only",
+        label="Core Bounce",
+        max_tier=1,
+        min_cooccurrence=2,
+        min_weight=0.05,
+        min_degree=3,
+        max_nodes=None,
+        max_edges=None,
+    ),
+}
 
-PRESET_STRICT = VizFilterConfig(
-    min_cooccurrence=3,
-    min_tracks=2,
-    max_nodes=3_000,
-    max_edges=50_000,
-    min_degree=3,
-)
+# Backwards compat aliases
+PRESET_DEFAULT = PRESETS["full-scene"]
+PRESET_STRICT = PRESETS["core-only"]
 
 
 def get_artist_track_counts(session: Session) -> dict[str, int]:
