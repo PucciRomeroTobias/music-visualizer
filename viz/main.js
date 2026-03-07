@@ -95,17 +95,51 @@ function hashCode(str) {
   return Math.abs(hash);
 }
 
-// === Node object builder (emissive sphere + label) ===
+// === Node mesh cache ===
+const meshCache = new Map(); // nodeId -> THREE.Mesh
+
 function buildNodeObject(node) {
+  let mesh = meshCache.get(node.id);
+  if (!mesh) {
+    const t = node.trackCount || 1;
+    const val = Math.pow(Math.log(t + 1), 2);
+    const radius = Math.cbrt(val) * 2.5;
+    const baseColor = new THREE.Color(
+      COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length]
+    );
+    const geometry = new THREE.SphereGeometry(radius, PERF.nodeResolution, PERF.nodeResolution);
+    const material = new THREE.MeshStandardMaterial({
+      color: baseColor,
+      emissive: baseColor,
+      emissiveIntensity: 0.6,
+      roughness: 0.4,
+      metalness: 0.1,
+    });
+    mesh = new THREE.Mesh(geometry, material);
+    meshCache.set(node.id, mesh);
+  }
+
+  // Update material state (cheap — no geometry recreation)
+  updateNodeMaterial(node, mesh);
+
+  // Update sprite label
+  // Remove old sprite children first
+  for (let i = mesh.children.length - 1; i >= 0; i--) {
+    mesh.remove(mesh.children[i]);
+  }
+  const sprite = getOrCreateSprite(node);
+  if (sprite) {
+    mesh.add(sprite);
+  }
+
+  return mesh;
+}
+
+function updateNodeMaterial(node, mesh) {
   const isSelected = selectedNode && node.id === selectedNode.id;
   const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
+  const mat = mesh.material;
 
-  // Sphere size from nodeVal formula
-  const t = node.trackCount || 1;
-  const val = Math.pow(Math.log(t + 1), 2);
-  const radius = Math.cbrt(val) * 2.5;
-
-  // Color
   let color;
   if (!selectedNode) {
     color = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
@@ -117,27 +151,35 @@ function buildNodeObject(node) {
     color = "#0a0014";
   }
 
-  const threeColor = new THREE.Color(color);
-  const emissiveIntensity = isSelected ? 2.0 : (selectedNode && !isNeighbor ? 0.1 : 0.6);
+  const c = new THREE.Color(color);
+  mat.color.copy(c);
+  mat.emissive.copy(c);
+  mat.emissiveIntensity = isSelected ? 2.0 : (selectedNode && !isNeighbor ? 0.1 : 0.6);
+}
 
-  const geometry = new THREE.SphereGeometry(radius, PERF.nodeResolution, PERF.nodeResolution);
-  const material = new THREE.MeshStandardMaterial({
-    color: threeColor,
-    emissive: threeColor,
-    emissiveIntensity: emissiveIntensity,
-    roughness: 0.4,
-    metalness: 0.1,
-  });
-
-  const mesh = new THREE.Mesh(geometry, material);
-
-  // Add sprite label
-  const sprite = getOrCreateSprite(node);
-  if (sprite) {
-    mesh.add(sprite);
+// Fast material-only update for all visible nodes (no mesh recreation)
+function refreshNodeMaterials() {
+  // Only nodes that need sprite updates: labelled, selected, neighbors
+  const spriteNodes = new Set(labelledNodeIds);
+  if (selectedNode) {
+    spriteNodes.add(selectedNode.id);
+    for (const id of selectedNeighborIds) spriteNodes.add(id);
   }
+  // Also update nodes that HAD sprites before (to remove them)
+  for (const id of spriteCache.keys()) spriteNodes.add(id);
 
-  return mesh;
+  for (const node of graphData.nodes) {
+    const mesh = meshCache.get(node.id);
+    if (!mesh) continue;
+    updateNodeMaterial(node, mesh);
+
+    // Only touch sprites for nodes that need them
+    if (spriteNodes.has(node.id)) {
+      for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+      const sprite = getOrCreateSprite(node);
+      if (sprite) mesh.add(sprite);
+    }
+  }
 }
 
 // === Create 3D graph ===
@@ -208,6 +250,7 @@ function createGraph() {
     })
     .onNodeClick(handleNodeClick)
     .onBackgroundClick(handleBackgroundClick)
+    .enableNodeDrag(false)
     // Step 1: No force simulation — positions are pre-computed
     .warmupTicks(0)
     .cooldownTicks(0);
@@ -376,17 +419,14 @@ function handleNodeClick(node) {
   const neighbors = neighborMap.get(node.id) || [];
   selectedNeighborIds = new Set(neighbors.map((n) => n.node?.id).filter(Boolean));
 
-  // Refresh visual state
-  graph.nodeColor(graph.nodeColor());
+  // Refresh visual state (materials only — no mesh recreation)
+  refreshNodeMaterials();
+  // Single link refresh — triggers one digest cycle for all link props
   graph.linkVisibility(graph.linkVisibility());
-  graph.linkColor(graph.linkColor());
-  graph.linkWidth(graph.linkWidth());
-  graph.linkDirectionalParticles(graph.linkDirectionalParticles());
-  graph.nodeThreeObject(graph.nodeThreeObject());
 
   showDetail(node);
 
-  // Focus camera on node
+  // Fly camera to node smoothly
   const distance = 500;
   const distRatio =
     1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0);
@@ -397,7 +437,7 @@ function handleNodeClick(node) {
       z: (node.z || 0) * distRatio,
     },
     node,
-    1200
+    2000 // 2s smooth flight
   );
 }
 
@@ -405,13 +445,10 @@ function handleBackgroundClick() {
   selectedNode = null;
   selectedNeighborIds = new Set();
 
-  // Restore visual state (clear particles too)
-  graph.nodeColor(graph.nodeColor());
+  // Restore visual state (materials only — no mesh recreation)
+  refreshNodeMaterials();
+  // Single link refresh — triggers one digest cycle for all link props
   graph.linkVisibility(graph.linkVisibility());
-  graph.linkColor(graph.linkColor());
-  graph.linkWidth(graph.linkWidth());
-  graph.linkDirectionalParticles(graph.linkDirectionalParticles());
-  graph.nodeThreeObject(graph.nodeThreeObject());
 
   hideDetail();
 }
@@ -475,7 +512,12 @@ async function showDetail(node) {
   tracksList.innerHTML = "";
   for (const t of nodeTracks) {
     const li = document.createElement("li");
-    li.innerHTML = `${escapeHtml(t.title)}<span class="track-platform">${t.platform}</span>`;
+    const url = trackUrl(t.platform, t.platformId);
+    if (url) {
+      li.innerHTML = `<a href="${url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a><span class="track-platform">${t.platform}</span>`;
+    } else {
+      li.innerHTML = `${escapeHtml(t.title)}<span class="track-platform">${t.platform}</span>`;
+    }
     tracksList.appendChild(li);
   }
 
@@ -586,6 +628,16 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function trackUrl(platform, platformId) {
+  if (!platformId) return null;
+  switch (platform) {
+    case "DEEZER": return `https://www.deezer.com/track/${platformId}`;
+    case "SOUNDCLOUD": return `https://soundcloud.com/${platformId}`;
+    case "SPOTIFY": return `https://open.spotify.com/track/${platformId}`;
+    default: return null;
+  }
 }
 
 // === Start ===
