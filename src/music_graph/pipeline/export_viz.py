@@ -79,15 +79,15 @@ def _get_artist_tracks(
     ):
         tracks_by_id[track.id] = track
 
-    track_platforms: dict[str, str] = {}
-    for track_id, platform in _batched_in(
+    track_platform_info: dict[str, tuple[str, str]] = {}  # track_id -> (platform, platform_id)
+    for track_id, platform, platform_id in _batched_in(
         session,
-        lambda ids: select(TrackSource.track_id, TrackSource.platform).where(
-            TrackSource.track_id.in_(ids)
-        ),
+        lambda ids: select(
+            TrackSource.track_id, TrackSource.platform, TrackSource.platform_id
+        ).where(TrackSource.track_id.in_(ids)),
         all_track_ids,
     ):
-        track_platforms[track_id] = platform.value
+        track_platform_info[track_id] = (platform.value, platform_id)
 
     result: dict[str, list[dict]] = {}
     for artist_id, track_ids in artist_track_ids.items():
@@ -95,9 +95,11 @@ def _get_artist_tracks(
         for tid in track_ids[:max_tracks_per_artist]:
             track = tracks_by_id.get(tid)
             if track:
+                platform, platform_id = track_platform_info.get(tid, ("unknown", ""))
                 tracks.append({
                     "title": track.canonical_title,
-                    "platform": track_platforms.get(tid, "unknown"),
+                    "platform": platform,
+                    "platformId": platform_id,
                 })
         result[artist_id] = tracks
     return result
