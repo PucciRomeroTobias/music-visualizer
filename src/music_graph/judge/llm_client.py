@@ -23,11 +23,11 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Gemini free tier: 2.5 Flash 10 RPM, 2.0 Flash 15 RPM
 # Groq free tier: ~30 RPM
 MODELS = [
-    ("ollama", "gemma2:9b"),
+    ("ollama", "gemma2:9b"),  # Local first — no rate limits
     ("gemini", "gemini-2.5-flash"),
     ("groq", "llama-3.3-70b-versatile"),
     ("gemini", "gemini-2.0-flash"),
-    ("groq", "gemma2-9b-it"),
+    ("groq", "llama-3.1-8b-instant"),
     ("gemini", "gemini-2.0-flash-lite"),
 ]
 
