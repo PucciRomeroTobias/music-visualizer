@@ -552,10 +552,21 @@ def sc_labels(
     max_minutes: float = typer.Option(
         15.0, help="Maximum batch duration in minutes"
     ),
+    wave: int = typer.Option(
+        1, help="Label wave: 1=original 25, 2=expanded labels, 3=bouncy techno artists"
+    ),
 ) -> None:
-    """Search SoundCloud for known bounce labels and ingest their playlists."""
+    """Search SoundCloud for known bounce labels/artists and ingest their playlists."""
     from music_graph.db import get_engine, get_session, init_db
-    from music_graph.pipeline.collect_judged import judged_search_sc_labels
+    from music_graph.pipeline.collect_judged import (
+        SC_ARTISTS_BOUNCY_TECHNO,
+        SC_LABELS,
+        SC_LABELS_WAVE2,
+        judged_search_sc_labels,
+    )
+
+    waves = {1: SC_LABELS, 2: SC_LABELS_WAVE2, 3: SC_ARTISTS_BOUNCY_TECHNO}
+    labels = waves.get(wave, SC_LABELS)
 
     engine = get_engine()
     init_db(engine)
@@ -563,6 +574,7 @@ def sc_labels(
     with get_session(engine) as session:
         result = judged_search_sc_labels(
             session,
+            labels=labels,
             max_minutes=max_minutes,
         )
 

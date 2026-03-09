@@ -4,13 +4,14 @@ Record of all data collection runs. Update this file after every collection.
 
 ## Current DB State
 
-- **Playlists**: 188 Deezer + 808 SoundCloud = 996 total
-- **Tracks**: 72,416 canonical (63,702 Deezer sources + 8,714 SoundCloud sources)
-- **Artists**: 21,129 canonical (17,292 Deezer sources + 5,073 SoundCloud sources)
+- **Playlists**: 219 Deezer + 1,223 SoundCloud = 1,442 total
+- **Tracks**: 76,838 canonical
+- **Artists**: 22,304 canonical
+- **Relevance tiers**: 1,442 playlists judged — ALL (486 tier 1, 497 tier 2, 252 tier 3, 207 tier 4)
 - **Genres**: 0 (enrichment not yet run)
 - **ISRCs**: 0 (enrichment not yet run)
 - **Cross-platform matches**: 161 accepted (65 exact + 96 fuzzy, artists only), 3,254 pending
-- **Last updated**: 2026-03-06
+- **Last updated**: 2026-03-07
 
 ## Completed Collections
 
@@ -128,9 +129,58 @@ All 31 tobasso playlists now in DB (21 newly ingested on 2026-03-06, 10 previous
 - **Key fix**: Added browser User-Agent to SoundCloud collector (SC blocks `python-requests` UA for private playlists)
 - **CLI**: `music-graph sc-collect --user-id 296527166`
 
+### 9. Multi-provider LLM Judge + Judged Deezer Search
+
+- **Date**: 2026-03-06
+- **Platform**: Deezer (public API)
+- **Method**: Keyword search with BounceJudge LLM filter — only playlists scoring tier 1-2 (score >= 5) get ingested
+- **Judge**: Multi-provider LLM client (Ollama gemma2:9b primary, Gemini 2.5-flash/2.0-flash fallback, Groq llama-3.3-70b/gemma2-9b-it fallback)
+- **Profile**: `config/bounce_profile.md` — tightened to reject false positives (generic trance, vocal trance, decade compilations)
+- **Keywords**: 27 expanded keywords covering bouncy techno, neo rave, hardgroove, hard house, eurotrance, acid techno, schranz, etc.
+- **Result**: 31 Deezer playlists judged and tiered (from first `dz-judged` run)
+- **CLI**: `music-graph dz-judged`
+
+### 10. SoundCloud — Label mining (judged)
+
+- **Date**: 2026-03-06 → 2026-03-07
+- **Platform**: SoundCloud (unofficial API v2)
+- **Method**: Search for 25 known bounce/neo rave labels, fetch their playlists, filter via BounceJudge
+- **Labels**: Ambra, Polyamor Records, Elemental Records, MASS, Molekül, SPEED, Reboot Records, H33 Records, ELOTRANCE, Sachsentrance, NEOTRANCE, Nektar Records, Bipolar Disorder Rec, Groove Street Berlin, GRS TECHNO, OBSCUUR, SYNTHX RECORDS, POWERTRANCE, Yeodel Rave, EXILE TRAX, Neon Dreams Cologne, DEAD END, Crimsonc9, SONICFLUX, GOTD
+- **Judge**: Ollama gemma2:9b (local, no rate limits, ~12s/playlist)
+- **Result**: 242 new SC playlists ingested, 240 judged (157 tier 1, 83 tier 2, 0 rejected — labels are high-signal)
+- **CLI**: `music-graph sc-labels --max-minutes 15` (multiple batches)
+
+### 11. SoundCloud — Label mining wave 2 (IN PROGRESS)
+
+- **Date**: 2026-03-07
+- **Platform**: SoundCloud (unofficial API v2)
+- **Method**: Expanded label list (37 labels) — labels discovered in DB + known scene labels
+- **Labels processed so far** (~8/37): Throne Room Records, Sopranos Bounce, COUP, Ramba Zamba Music, VERKNIPT (partial — user "Chemtrailz" has 49 playlists, still processing)
+- **Labels remaining** (~29): Beatroot Records, TripleXL, RAVE ALERT, INITIALIZE, unregular, Deadly Alive, NOTMYTYPE, Need More Speed, Selicato, Taapion, Sound Transitions, Ritmo Fatale, TNBN Records, Exhausted Modern, Kneaded Pains, Rave Instinct, Warehouse Rave, Bounce Inc, FCKNG SERIOUS, Filth on Acid, Hardgroove Records, Toolroom Trax, ÄVEM Records, Voltage Records, Bounce Heaven, This Is Bounce UK, Donk Records, Sick Slaughterhouse, Kuudos Records, Possession, DSNT, Perc Trax
+- **Judge**: Ollama gemma2:9b (local) with Gemini/Groq fallback
+- **Result so far**: 5 batches × 15 min, 173 playlists ingested, ~96 rejected (~36% rejection rate)
+- **Status**: PAUSED — resume with `music-graph sc-labels --wave 2 --max-minutes 15`
+- **CLI**: `music-graph sc-labels --wave 2 --max-minutes 15`
+
+### 12. Bulk playlist judging (all existing playlists)
+
+- **Date**: 2026-03-07
+- **Platform**: N/A (post-processing, DB-only)
+- **Method**: Ran `judge-existing` on all 987 playlists without `relevance_tier`. Reads 15-track sample from DB, sends to BounceJudge LLM, writes tier + genre back. No platform API calls needed.
+- **Judge**: Ollama gemma2:9b (primary), Gemini/Groq as fallback (rate-limited on free tier, mostly fell back to Ollama)
+- **Concurrency**: Another SC label mining process was writing to the DB simultaneously. Enabled WAL mode on SQLite + added commit-with-retry logic to avoid lock conflicts.
+- **Batches**: 12 × 15 min (~3 hours total), ~80-120 playlists per batch
+- **Result**: 987 playlists judged (+ 179 new playlists from concurrent collection also judged). Final state: 0 playlists without tier.
+- **Tier distribution (all 1,442 playlists)**: 486 tier 1, 497 tier 2, 252 tier 3, 207 tier 4
+- **CLI**: `music-graph judge-existing --max-minutes 15` (repeated 12 times)
+
 ## Not Yet Done
 
 - [x] ~~Download tobasso's playlists~~ (completed 2026-03-06, all 31 playlists)
+- [x] ~~SC label mining wave 1~~ (completed 2026-03-07, 25 labels, 240 playlists judged)
+- [ ] SC label mining wave 2 — ~29/37 labels remaining (resume `sc-labels --wave 2`)
+- [x] ~~Judge existing playlists~~ (completed 2026-03-07, all 1,442 playlists tiered)
+- [ ] Deezer judged search — second round with corrected profile + Ollama
 - [ ] ISRC enrichment (Deezer track details have ISRCs — never fetched)
 - [ ] Genre/tag enrichment (Last.fm tags, Deezer album genres)
 - [ ] Resolve pending 3,254 match candidates

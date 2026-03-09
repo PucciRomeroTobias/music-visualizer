@@ -87,6 +87,105 @@ SC_LABELS = [
     "GOTD",
 ]
 
+# Wave 2: more labels/collectives from the scene + discovered in DB
+SC_LABELS_WAVE2 = [
+    # Labels/collectives from the bounce & neo rave scene
+    "Throne Room Records",
+    "Sopranos Bounce",
+    "COUP",
+    "Ramba Zamba Music",
+    "VERKNIPT",
+    "Beatroot Records",
+    "TripleXL",
+    "RAVE ALERT",
+    "INITIALIZE",
+    "unregular",
+    "Deadly Alive",
+    "NOTMYTYPE",
+    "Need More Speed",
+    "Selicato",
+    "Taapion",
+    "Sound Transitions",
+    # Known bounce/neo rave labels not yet searched
+    "Ritmo Fatale",
+    "TNBN Records",
+    "Exhausted Modern",
+    "Kneaded Pains",
+    "Rave Instinct",
+    "Warehouse Rave",
+    "Bounce Inc",
+    "FCKNG SERIOUS",
+    "Filth on Acid",
+    "Hardgroove Records",
+    "Toolroom Trax",
+    "ÄVEM Records",
+    "Voltage Records",
+    "Bounce Heaven",
+    "This Is Bounce UK",
+    "Donk Records",
+    "Sick Slaughterhouse",
+    "Kuudos Records",
+    "Possession",
+    "DSNT",
+    "Perc Trax",
+]
+
+# Wave 3: Artists from tobasso's "Bouncy Techno 2" playlist — mine their SC profiles
+SC_ARTISTS_BOUNCY_TECHNO = [
+    "ANDREASZ",
+    "AREA ØNE",
+    "Antonym",
+    "Argot",
+    "Bad Boombox",
+    "Boys Noize",
+    "Brutalismus 3000",
+    "Caspii",
+    "DJ GUESTLIST",
+    "DJ Tallboy",
+    "DXPE",
+    "Doruksen",
+    "ELON BASS",
+    "Eskha",
+    "Fenrick",
+    "Funk Tribu",
+    "Gonzi",
+    "IOSIO",
+    "JOKESONYOU",
+    "Kichta",
+    "L.zwo",
+    "Linds",
+    "Madpace",
+    "Marlon Hoffstadt",
+    "Mosmoz",
+    "Noise Mafia",
+    "Odymel",
+    "Paraçek",
+    "Part Time Killer",
+    "Pegassi",
+    "REVEX",
+    "Tell Moore",
+    "Vizionn",
+    "davyboi",
+    "t e s t p r e s s",
+    "240 KM/H",
+    "2HOT2PLAY",
+    "Anwarr",
+    "BIIANCO",
+    "Cara Elizabeth",
+    "Krl Mx",
+    "LE B",
+    "N00M1",
+    "Nyco",
+    "Saul High",
+    "Shvdz",
+    "Staffy",
+    "THISO",
+    "The Rocketman",
+    "Uberjak'd",
+    "Ueberrest",
+    "Vespera",
+]
+
 MIN_SCORE = 5  # Tier 1-2 only
 
 
@@ -389,6 +488,30 @@ def judged_search_sc_labels(
     return summary
 
 
+def _commit_with_retry(session: Session, max_retries: int = 5) -> None:
+    """Commit with retry on SQLite busy/locked errors.
+
+    Uses exponential backoff to avoid fighting with concurrent writers.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    for attempt in range(max_retries):
+        try:
+            session.commit()
+            return
+        except OperationalError as e:
+            if "locked" in str(e).lower() and attempt < max_retries - 1:
+                wait = 0.5 * (2 ** attempt)
+                logger.warning(
+                    "DB locked on commit (attempt {}), retrying in {:.1f}s",
+                    attempt + 1, wait,
+                )
+                session.rollback()
+                time.sleep(wait)
+            else:
+                raise
+
+
 def judge_existing_playlists(
     session: Session,
     max_minutes: float = 15.0,
@@ -396,6 +519,7 @@ def judge_existing_playlists(
     """Judge existing playlists that don't have a relevance_tier yet.
 
     Does NOT delete anything — only sets relevance_tier and relevance_genre.
+    Designed for concurrent use: uses short transactions and retries on lock.
     """
     max_seconds = max_minutes * 60
     batch_start = time.monotonic()
@@ -410,28 +534,35 @@ def judge_existing_playlists(
         "timed_out": 0,
     }
 
-    # Get playlists without a tier, ordered by track count (biggest first)
-    playlists = session.exec(
-        select(Playlist)
+    from music_graph.models.track import Track
+    from music_graph.models.playlist import PlaylistTrack
+
+    # Snapshot: grab IDs + metadata of unjudged playlists (short read)
+    unjudged = session.exec(
+        select(
+            Playlist.id,
+            Playlist.platform,
+            Playlist.platform_id,
+            Playlist.name,
+            Playlist.owner_name,
+            Playlist.track_count,
+        )
         .where(Playlist.relevance_tier.is_(None))
         .order_by(Playlist.track_count.desc())
     ).all()
 
-    logger.info("Found {} playlists to judge", len(playlists))
+    logger.info("Found {} playlists to judge", len(unjudged))
 
-    from music_graph.models.track import Track, TrackArtist
-    from music_graph.models.playlist import PlaylistTrack
-
-    for playlist in playlists:
+    for pl_id, platform, platform_id, name, owner_name, track_count in unjudged:
         if _time_remaining(batch_start, max_seconds) < 10:
             summary["timed_out"] = 1
             break
 
-        # Build track sample from DB
+        # Short read transaction: fetch track sample
         track_rows = session.exec(
             select(Track.canonical_title, Track.canonical_artist_name)
             .join(PlaylistTrack, PlaylistTrack.track_id == Track.id)
-            .where(PlaylistTrack.playlist_id == playlist.id)
+            .where(PlaylistTrack.playlist_id == pl_id)
             .limit(15)
         ).all()
 
@@ -440,14 +571,15 @@ def judge_existing_playlists(
             for title, artist in track_rows
         ]
 
+        # LLM call (slow part — no DB lock held)
         result = _judge_playlist(
             judge,
             RawPlaylist(
-                platform=playlist.platform,
-                platform_id=playlist.platform_id,
-                name=playlist.name,
-                owner_name=playlist.owner_name,
-                track_count=playlist.track_count,
+                platform=platform,
+                platform_id=platform_id,
+                name=name,
+                owner_name=owner_name,
+                track_count=track_count,
             ),
             tracks_sample,
         )
@@ -456,9 +588,12 @@ def judge_existing_playlists(
         genre = result.get("dominated_by")
         score = result.get("score", 0)
 
-        playlist.relevance_tier = tier
-        playlist.relevance_genre = genre
-        session.commit()
+        # Short write transaction: update tier
+        playlist = session.get(Playlist, pl_id)
+        if playlist and playlist.relevance_tier is None:
+            playlist.relevance_tier = tier
+            playlist.relevance_genre = genre
+            _commit_with_retry(session)
 
         summary["playlists_judged"] += 1
         summary[f"tier_{tier}"] = summary.get(f"tier_{tier}", 0) + 1
@@ -466,8 +601,8 @@ def judge_existing_playlists(
         logger.info(
             "[{}/{}] '{}' → tier {} (score={}, genre={})",
             summary["playlists_judged"],
-            len(playlists),
-            playlist.name,
+            len(unjudged),
+            name,
             tier,
             score,
             genre,
