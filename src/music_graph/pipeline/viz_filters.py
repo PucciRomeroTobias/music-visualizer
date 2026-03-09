@@ -27,6 +27,7 @@ class VizFilterConfig:
     # ── Preset identity ───────────────────────────────────────
     name: str = "default"
     label: str = "Full Scene"  # human-readable label for the UI
+    node_type: str = "artist"  # "artist" or "track"
 
     # ── Edge construction (passed to build_graph) ─────────────
     min_cooccurrence: int = 2
@@ -80,6 +81,46 @@ PRESETS: dict[str, VizFilterConfig] = {
         min_degree=3,
         max_nodes=None,
         max_edges=None,
+    ),
+}
+
+TRACK_PRESETS: dict[str, VizFilterConfig] = {
+    "full-scene": VizFilterConfig(
+        name="full-scene",
+        label="Full Scene",
+        node_type="track",
+        min_cooccurrence=2,
+        min_degree=3,
+        max_nodes=4_000,
+        max_edges=150_000,
+        max_tier=3,
+        resolution=0.5,
+        blocklist_names=[],
+    ),
+    "bounce-focus": VizFilterConfig(
+        name="bounce-focus",
+        label="Bounce Focus",
+        node_type="track",
+        min_cooccurrence=2,
+        min_degree=3,
+        max_nodes=3_000,
+        max_edges=100_000,
+        max_tier=2,
+        resolution=1.0,
+        blocklist_names=[],
+    ),
+    "core-only": VizFilterConfig(
+        name="core-only",
+        label="Core Bounce",
+        node_type="track",
+        min_cooccurrence=2,
+        min_weight=0.05,
+        min_degree=3,
+        max_nodes=None,
+        max_edges=None,
+        max_tier=1,
+        resolution=0.5,
+        blocklist_names=[],
     ),
 }
 

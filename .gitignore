@@ -24,8 +24,9 @@ data/
 .playwright-mcp/
 .spotify_cache
 
-# Screenshots (temporary)
+# Screenshots (temporary, except README images)
 *.png
+!docs/images/*.png
 
 # Caches
 .cache/

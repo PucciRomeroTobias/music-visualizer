@@ -20,10 +20,17 @@ def _pairs_from_group(items: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
-def project_track_cooccurrence(session: Session) -> dict[tuple[str, str], int]:
+def project_track_cooccurrence(
+    session: Session,
+    playlist_ids: set[str] | None = None,
+) -> dict[tuple[str, str], int]:
     """Build track co-occurrence from shared playlists.
 
     Edge between tracks if they appear in the same playlist.
+
+    Args:
+        session: Database session.
+        playlist_ids: If set, only consider these playlists. None = all.
     """
     logger.info("Projecting track co-occurrence...")
 
@@ -31,6 +38,8 @@ def project_track_cooccurrence(session: Session) -> dict[tuple[str, str], int]:
     playlist_tracks = session.exec(select(PlaylistTrack)).all()
     playlists: dict[str, list[str]] = defaultdict(list)
     for pt in playlist_tracks:
+        if playlist_ids is not None and pt.playlist_id not in playlist_ids:
+            continue
         playlists[pt.playlist_id].append(pt.track_id)
 
     cooccurrence: dict[tuple[str, str], int] = defaultdict(int)

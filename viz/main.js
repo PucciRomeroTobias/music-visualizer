@@ -60,6 +60,7 @@ let tracksData = null; // loaded on first click
 // === Deezer preview playback ===
 let previewAudio = null; // current Audio instance
 let previewBtn = null; // current playing button element
+let previewDeezerId = null; // deezerId currently playing
 
 function deezerJsonp(deezerId) {
   return new Promise((resolve, reject) => {
@@ -88,8 +89,8 @@ function deezerJsonp(deezerId) {
 }
 
 async function playDeezerPreview(deezerId, btn) {
-  // If clicking the same button that's playing, toggle pause/play
-  if (previewAudio && previewBtn === btn) {
+  // If clicking the same track that's playing, toggle pause/play
+  if (previewAudio && previewDeezerId === deezerId) {
     if (previewAudio.paused) {
       previewAudio.play();
       btn.textContent = "⏸";
@@ -121,12 +122,14 @@ async function playDeezerPreview(deezerId, btn) {
 
     previewAudio = new Audio(previewUrl);
     previewBtn = btn;
+    previewDeezerId = deezerId;
     btn.textContent = "⏸";
 
     previewAudio.addEventListener("ended", () => {
       btn.textContent = "▶";
       previewAudio = null;
       previewBtn = null;
+      previewDeezerId = null;
     });
 
     previewAudio.addEventListener("error", () => {
@@ -134,6 +137,7 @@ async function playDeezerPreview(deezerId, btn) {
       setTimeout(() => (btn.textContent = "▶"), 2000);
       previewAudio = null;
       previewBtn = null;
+      previewDeezerId = null;
     });
 
     previewAudio.play();
@@ -143,21 +147,31 @@ async function playDeezerPreview(deezerId, btn) {
   }
 }
 
-// === Preset handling ===
+// === Preset & graph type handling ===
 let currentPreset = "full-scene";
+let currentGraphType = "artist";
 
-function getPresetFromUrl() {
+function getParamsFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  return params.get("preset") || "full-scene";
+  return {
+    preset: params.get("preset") || "full-scene",
+    type: params.get("type") || "artist",
+  };
 }
 
 function dataPath(file) {
-  return `./data/${currentPreset}/${file}`;
+  return `./data/${currentGraphType}/${currentPreset}/${file}`;
+}
+
+function getNodeSizeMetric(node) {
+  return currentGraphType === "track" ? (node.playlists || 1) : (node.trackCount || 1);
 }
 
 // === Load data ===
 async function init() {
-  currentPreset = getPresetFromUrl();
+  const params = getParamsFromUrl();
+  currentPreset = params.preset;
+  currentGraphType = params.type;
 
   const res = await fetch(dataPath("graph.json"));
   graphData = await res.json();
@@ -175,8 +189,8 @@ async function init() {
     neighborMap.get(tgt)?.push({ node: nodeById.get(src), weight: link.weight });
   }
 
-  // Determine top N nodes by playlist count for permanent labels
-  const sorted = [...graphData.nodes].sort((a, b) => b.playlists - a.playlists);
+  // Determine top N nodes by size metric for permanent labels
+  const sorted = [...graphData.nodes].sort((a, b) => getNodeSizeMetric(b) - getNodeSizeMetric(a));
   labelledNodeIds = new Set(sorted.slice(0, PERF.labelTopN).map((n) => n.id));
 
   // Step 1: Pre-compute fixed positions from exported 3D layout
@@ -196,6 +210,7 @@ async function init() {
   setupLabelsToggle();
   setupResetCamera();
   setupPresetSelector();
+  setupGraphTypeTabs();
   hideLoading();
 }
 
@@ -214,7 +229,7 @@ const meshCache = new Map(); // nodeId -> THREE.Mesh
 function buildNodeObject(node) {
   let mesh = meshCache.get(node.id);
   if (!mesh) {
-    const t = node.trackCount || 1;
+    const t = getNodeSizeMetric(node);
     const val = Math.pow(Math.log(t + 1), 2);
     const radius = Math.cbrt(val) * 2.5;
     const baseColor = new THREE.Color(
@@ -331,7 +346,7 @@ function createGraph() {
     // Node sizing: log scale of track count for visible difference
     .nodeRelSize(6)
     .nodeVal((n) => {
-      const t = n.trackCount || 1;
+      const t = getNodeSizeMetric(n);
       return Math.pow(Math.log(t + 1), 2);
     })
     .nodeColor((n) => {
@@ -527,7 +542,7 @@ function getOrCreateSprite(node) {
     sprite.textHeight = 8;
   }
 
-  const t = node.trackCount || 1;
+  const t = getNodeSizeMetric(node);
   const nodeSize = Math.pow(Math.log(t + 1), 2);
   const yOffset = isSelected
     ? Math.cbrt(nodeSize) * 5 + 10
@@ -614,7 +629,7 @@ function handleNodeHover(node) {
         hoverSprite.borderRadius = 2;
         hoverSprite.padding = 1;
         hoverSprite.textHeight = 5;
-        const t = hoveredNode.trackCount || 1;
+        const t = getNodeSizeMetric(hoveredNode);
         const nodeSize = Math.pow(Math.log(t + 1), 2);
         hoverSprite.position.y = Math.cbrt(nodeSize) * 4 + 8;
         mesh.add(hoverSprite);
@@ -647,8 +662,9 @@ function setupDetailPanel() {
   });
 }
 
-// Step 5: Lazy-load tracks
+// Step 5: Lazy-load tracks (artist mode only)
 async function loadTracks() {
+  if (currentGraphType === "track") return {};
   if (tracksData) return tracksData;
   try {
     const res = await fetch(dataPath("graph_tracks.json"));
@@ -659,12 +675,29 @@ async function loadTracks() {
   return tracksData;
 }
 
+function formatDuration(seconds) {
+  if (!seconds) return "--:--";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 async function showDetail(node) {
   // Use stored copy since 3d-force-graph strips custom fields from node objects
   const data = nodeById.get(node.id) || node;
+  const isTrackMode = currentGraphType === "track";
 
   const panel = document.getElementById("detail-panel");
   document.getElementById("detail-name").textContent = data.name;
+
+  // Artist subtitle (track mode only)
+  const subtitleEl = document.getElementById("detail-artist-subtitle");
+  if (isTrackMode && data.artistName) {
+    subtitleEl.textContent = data.artistName;
+    subtitleEl.style.display = "block";
+  } else {
+    subtitleEl.style.display = "none";
+  }
 
   // Platforms
   const platformsEl = document.getElementById("detail-platforms");
@@ -687,37 +720,89 @@ async function showDetail(node) {
   document.getElementById("detail-community").textContent =
     communityName || (`#${communityIdx}` + (topArtists ? ` (${topArtists})` : ""));
 
-  // Stats
-  document.getElementById("detail-connections").textContent = data.connections ?? 0;
-  document.getElementById("detail-playlists").textContent = data.playlists ?? 0;
-  document.getElementById("detail-track-count").textContent = data.trackCount ?? 0;
-
-  // Tracks — lazy load from sidecar
-  const tracksList = document.getElementById("detail-tracks");
-  tracksList.innerHTML = "<li>Loading...</li>";
-  const tracks = await loadTracks();
-  const nodeTracks = (tracks[data.id] || []).slice(0, 10);
-  tracksList.innerHTML = "";
-  for (const t of nodeTracks) {
-    const li = document.createElement("li");
-    const titleHtml = t.url
-      ? `<a href="${t.url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a>`
-      : escapeHtml(t.title);
-    const playBtn = t.deezerId
-      ? `<button class="track-play" data-deezer-id="${t.deezerId}" title="Preview">▶</button>`
-      : "";
-    li.innerHTML = `${playBtn}${titleHtml}<span class="track-platform">${t.platform}</span>`;
-    tracksList.appendChild(li);
+  // Stats — dynamic based on mode
+  const statsEl = document.getElementById("detail-stats");
+  statsEl.innerHTML = "";
+  if (isTrackMode) {
+    statsEl.innerHTML = `
+      <div class="stat-item">
+        <div class="stat-value">${data.connections ?? 0}</div>
+        <div class="stat-label">CONNECTIONS</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">${data.playlists ?? 0}</div>
+        <div class="stat-label">PLAYLISTS</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">${formatDuration(data.duration)}</div>
+        <div class="stat-label">DURATION</div>
+      </div>
+    `;
+  } else {
+    statsEl.innerHTML = `
+      <div class="stat-item">
+        <div class="stat-value">${data.connections ?? 0}</div>
+        <div class="stat-label">CONNECTIONS</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">${data.playlists ?? 0}</div>
+        <div class="stat-label">PLAYLISTS</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">${data.trackCount ?? 0}</div>
+        <div class="stat-label">TRACKS</div>
+      </div>
+    `;
   }
-  // Attach play handlers
-  tracksList.querySelectorAll(".track-play").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      playDeezerPreview(btn.dataset.deezerId, btn);
-    });
-  });
 
-  // Connected artists (top 10 by weight)
+  // Inline play button (track mode with deezerId)
+  const playSection = document.getElementById("detail-play-section");
+  if (isTrackMode && data.deezerId) {
+    playSection.style.display = "block";
+    const playBtn = document.getElementById("detail-play-btn");
+    playBtn.textContent = "▶";
+    playBtn.onclick = (e) => {
+      e.stopPropagation();
+      playDeezerPreview(data.deezerId, playBtn);
+    };
+  } else {
+    playSection.style.display = "none";
+  }
+
+  // Tracks section (artist mode) or hidden (track mode)
+  const tracksSection = document.getElementById("detail-tracks-section");
+  const tracksList = document.getElementById("detail-tracks");
+  if (isTrackMode) {
+    tracksSection.style.display = "none";
+  } else {
+    tracksSection.style.display = "block";
+    document.getElementById("detail-tracks-label").textContent = "TRACKS";
+    tracksList.innerHTML = "<li>Loading...</li>";
+    const tracks = await loadTracks();
+    const nodeTracks = (tracks[data.id] || []).slice(0, 10);
+    tracksList.innerHTML = "";
+    for (const t of nodeTracks) {
+      const li = document.createElement("li");
+      const titleHtml = t.url
+        ? `<a href="${t.url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a>`
+        : escapeHtml(t.title);
+      const playBtn = t.deezerId
+        ? `<button class="track-play" data-deezer-id="${t.deezerId}" title="Preview">▶</button>`
+        : "";
+      li.innerHTML = `${playBtn}${titleHtml}<span class="track-platform">${t.platform}</span>`;
+      tracksList.appendChild(li);
+    }
+    tracksList.querySelectorAll(".track-play").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        playDeezerPreview(btn.dataset.deezerId, btn);
+      });
+    });
+  }
+
+  // Connected nodes (top 10 by weight)
+  document.getElementById("detail-neighbors-label").textContent =
+    isTrackMode ? "CONNECTED TRACKS" : "CONNECTED ARTISTS";
   const neighbors = (neighborMap.get(data.id) || [])
     .filter((n) => n.node)
     .sort((a, b) => b.weight - a.weight)
@@ -744,6 +829,7 @@ function hideDetail() {
 // === Search ===
 function setupSearch() {
   const input = document.getElementById("search-input");
+  input.placeholder = currentGraphType === "track" ? "SEARCH TRACK..." : "SEARCH ARTIST...";
   const results = document.getElementById("search-results");
 
   input.addEventListener("input", () => {
@@ -832,7 +918,13 @@ async function setupPresetSelector() {
   if (!wrapper) return;
   try {
     const res = await fetch("./data/presets.json");
-    const presets = await res.json();
+    const allPresets = await res.json();
+
+    // Support both old array format and new {artist: [...], track: [...]} format
+    const presets = Array.isArray(allPresets)
+      ? allPresets
+      : (allPresets[currentGraphType] || []);
+
     if (presets.length <= 1) { wrapper.style.display = "none"; return; }
 
     const current = presets.find((p) => p.name === currentPreset) || presets[0];
@@ -845,7 +937,8 @@ async function setupPresetSelector() {
     for (const p of presets) {
       const item = document.createElement("button");
       item.textContent = p.label;
-      item.title = `${p.nodes} artists, ${p.communities} communities`;
+      const nodeLabel = currentGraphType === "track" ? "tracks" : "artists";
+      item.title = `${p.nodes} ${nodeLabel}, ${p.communities} communities`;
       item.classList.add("preset-item");
       if (p.name === currentPreset) item.classList.add("active");
       item.addEventListener("click", () => {
@@ -865,6 +958,24 @@ async function setupPresetSelector() {
   } catch {
     wrapper.style.display = "none";
   }
+}
+
+// === Graph type tabs ===
+function setupGraphTypeTabs() {
+  const tabs = document.querySelectorAll(".type-tab");
+  tabs.forEach((tab) => {
+    if (tab.dataset.type === currentGraphType) {
+      tab.classList.add("active");
+    }
+    tab.addEventListener("click", () => {
+      const type = tab.dataset.type;
+      if (type === currentGraphType) return;
+      const url = new URL(window.location);
+      url.searchParams.set("type", type);
+      url.searchParams.set("preset", "full-scene");
+      window.location.href = url.toString();
+    });
+  });
 }
 
 // === Reset camera ===

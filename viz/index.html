@@ -3,11 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NOWARMUP — Artist Graph</title>
+    <title>NOWARMUP — Music Graph</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div id="graph-container"></div>
+
+    <!-- Graph type tabs -->
+    <div id="graph-type-tabs">
+      <button class="type-tab" data-type="artist">ARTISTAS</button>
+      <button class="type-tab" data-type="track">TRACKS</button>
+    </div>
 
     <!-- Search bar -->
     <div id="search-bar">
@@ -36,35 +42,26 @@
       <div id="legend-items"></div>
     </div>
 
-    <!-- Artist detail panel -->
+    <!-- Detail panel (artist or track) -->
     <div id="detail-panel" class="hidden">
       <button id="detail-close">&times;</button>
       <h2 id="detail-name"></h2>
+      <div id="detail-artist-subtitle"></div>
       <div id="detail-platforms"></div>
       <div class="detail-section">
         <div class="detail-label">COMMUNITY</div>
         <div id="detail-community"></div>
       </div>
-      <div class="detail-stats">
-        <div class="stat-item">
-          <div class="stat-value" id="detail-connections"></div>
-          <div class="stat-label">CONNECTIONS</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="detail-playlists"></div>
-          <div class="stat-label">PLAYLISTS</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="detail-track-count"></div>
-          <div class="stat-label">TRACKS</div>
-        </div>
+      <div class="detail-stats" id="detail-stats"></div>
+      <div class="detail-section" id="detail-play-section" style="display:none">
+        <button id="detail-play-btn" class="track-play" title="Preview">▶</button>
       </div>
-      <div class="detail-section">
-        <div class="detail-label">TRACKS</div>
+      <div class="detail-section" id="detail-tracks-section">
+        <div class="detail-label" id="detail-tracks-label">TRACKS</div>
         <ul id="detail-tracks"></ul>
       </div>
       <div class="detail-section">
-        <div class="detail-label">CONNECTED ARTISTS</div>
+        <div class="detail-label" id="detail-neighbors-label">CONNECTED ARTISTS</div>
         <ul id="detail-neighbors"></ul>
       </div>
     </div>

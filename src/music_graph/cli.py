@@ -382,60 +382,80 @@ def match(
 def export_viz(
     preset: str = typer.Argument(
         "full-scene",
-        help="Preset name (full-scene, deep-dive, core-only) or 'all' to generate all",
+        help="Preset name (full-scene, bounce-focus, core-only) or 'all' to generate all",
     ),
     output_dir: Path = typer.Option(
         Path("viz/public/data"), help="Base output directory"
     ),
+    graph_type: str = typer.Option(
+        "all",
+        "--graph-type",
+        help="Graph type: artist, track, or all",
+    ),
 ) -> None:
     """Export graph data as JSON for visualization.
 
-    Each preset generates files in output_dir/{preset}/graph.json.
+    Each preset generates files in output_dir/{graph_type}/{preset}/graph.json.
     A presets.json manifest is written to output_dir/ for the frontend.
     """
     from music_graph.db import get_engine, get_session
     from music_graph.pipeline.export_viz import export_visualization_json
-    from music_graph.pipeline.viz_filters import PRESETS
+    from music_graph.pipeline.viz_filters import PRESETS, TRACK_PRESETS
 
-    if preset == "all":
-        preset_names = list(PRESETS.keys())
-    elif preset in PRESETS:
-        preset_names = [preset]
-    else:
-        typer.echo(
-            f"Unknown preset '{preset}'. Options: {list(PRESETS.keys())} or 'all'"
-        )
+    if graph_type not in ("artist", "track", "all"):
+        typer.echo(f"Unknown graph-type '{graph_type}'. Options: artist, track, all")
         raise typer.Exit(1)
 
+    # Build list of (graph_type, presets_dict) to process
+    type_presets: list[tuple[str, dict]] = []
+    if graph_type in ("artist", "all"):
+        type_presets.append(("artist", PRESETS))
+    if graph_type in ("track", "all"):
+        type_presets.append(("track", TRACK_PRESETS))
+
     engine = get_engine()
-    manifest = []
+    manifest: dict[str, list[dict]] = {}
 
-    for name in preset_names:
-        config = PRESETS[name]
-        preset_dir = output_dir / name
-        output_path = preset_dir / "graph.json"
-
-        typer.echo(f"\n── Generating preset: {name} ({config.label}) ──")
-
-        with get_session(engine) as session:
-            result = export_visualization_json(
-                session,
-                output_path=output_path,
-                config=config,
+    for gtype, presets_dict in type_presets:
+        if preset == "all":
+            preset_names = list(presets_dict.keys())
+        elif preset in presets_dict:
+            preset_names = [preset]
+        else:
+            typer.echo(
+                f"Unknown preset '{preset}' for {gtype}. "
+                f"Options: {list(presets_dict.keys())} or 'all'"
             )
+            raise typer.Exit(1)
 
-        manifest.append({
-            "name": config.name,
-            "label": config.label,
-            "nodes": result["nodes"],
-            "edges": result["edges"],
-            "communities": result["communities"],
-        })
+        manifest[gtype] = []
 
-        typer.echo(
-            f"  → {result['nodes']} nodes, {result['edges']} edges, "
-            f"{result['communities']} communities"
-        )
+        for name in preset_names:
+            config = presets_dict[name]
+            preset_dir = output_dir / gtype / name
+            output_path = preset_dir / "graph.json"
+
+            typer.echo(f"\n── Generating {gtype}/{name} ({config.label}) ──")
+
+            with get_session(engine) as session:
+                result = export_visualization_json(
+                    session,
+                    output_path=output_path,
+                    config=config,
+                )
+
+            manifest[gtype].append({
+                "name": config.name,
+                "label": config.label,
+                "nodes": result["nodes"],
+                "edges": result["edges"],
+                "communities": result["communities"],
+            })
+
+            typer.echo(
+                f"  → {result['nodes']} nodes, {result['edges']} edges, "
+                f"{result['communities']} communities"
+            )
 
     # Write manifest for frontend preset selector
     manifest_path = output_dir / "presets.json"

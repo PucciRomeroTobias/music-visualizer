@@ -105,6 +105,15 @@ def _merge_small_communities(
                 if w > best_weight:
                     best_weight = w
                     best_target = j
+            # If no edges to any neighbor, absorb into the largest community
+            if best_target < 0:
+                largest_idx = max(
+                    (j for j in range(len(merged)) if j != i and len(merged[j]) > 0),
+                    key=lambda j: len(merged[j]),
+                    default=-1,
+                )
+                best_target = largest_idx
+
             if best_target >= 0:
                 # Absorb community i into best_target
                 merged[best_target] = merged[best_target] | merged[i]
@@ -313,6 +322,85 @@ def _compute_community_layout(
     return positions
 
 
+def _get_track_platforms(session: Session) -> dict[str, list[str]]:
+    """Get platform list for each track."""
+    rows = session.exec(select(TrackSource.track_id, TrackSource.platform)).all()
+    platforms: dict[str, set[str]] = defaultdict(set)
+    for track_id, platform in rows:
+        platforms[track_id].add(platform.value)
+    return {k: sorted(v) for k, v in platforms.items()}
+
+
+def _get_track_metadata(
+    session: Session, track_ids: set[str]
+) -> dict[str, dict]:
+    """Get metadata for tracks: artist name, duration, deezer ID, URL."""
+    tracks_by_id: dict[str, Track] = {}
+    for track in _batched_in(
+        session, lambda ids: select(Track).where(Track.id.in_(ids)), track_ids
+    ):
+        tracks_by_id[track.id] = track
+
+    # Get primary artist name per track via TrackArtist
+    from music_graph.models.artist import Artist
+
+    ta_rows = _batched_in(
+        session,
+        lambda ids: select(TrackArtist).where(TrackArtist.track_id.in_(ids)),
+        track_ids,
+    )
+    track_artist_ids: dict[str, str] = {}
+    for ta in ta_rows:
+        if ta.track_id not in track_artist_ids:
+            track_artist_ids[ta.track_id] = ta.artist_id
+
+    artist_ids = set(track_artist_ids.values())
+    artists_by_id: dict[str, str] = {}
+    for artist in _batched_in(
+        session, lambda ids: select(Artist).where(Artist.id.in_(ids)), artist_ids
+    ):
+        artists_by_id[artist.id] = artist.canonical_name
+
+    # Get track sources for URL + deezerId
+    track_sources: dict[str, TrackSource] = {}
+    for ts in _batched_in(
+        session,
+        lambda ids: select(TrackSource).where(TrackSource.track_id.in_(ids)),
+        track_ids,
+    ):
+        # Prefer Deezer source for URL/preview
+        if ts.track_id not in track_sources or ts.platform == SourcePlatform.DEEZER:
+            track_sources[ts.track_id] = ts
+
+    result: dict[str, dict] = {}
+    for tid in track_ids:
+        track = tracks_by_id.get(tid)
+        if not track:
+            continue
+        ts = track_sources.get(tid)
+        artist_id = track_artist_ids.get(tid)
+        meta: dict = {
+            "artistName": artists_by_id.get(artist_id, track.canonical_artist_name) if artist_id else track.canonical_artist_name,
+            "duration": (track.duration_ms // 1000) if track.duration_ms else None,
+        }
+        if ts:
+            meta["url"] = _track_url(ts)
+            if ts.platform == SourcePlatform.DEEZER:
+                meta["deezerId"] = ts.platform_id
+        result[tid] = meta
+
+    return result
+
+
+def _get_track_playlist_counts(session: Session) -> dict[str, int]:
+    """Get number of distinct playlists each track appears in."""
+    rows = session.exec(select(PlaylistTrack.track_id, PlaylistTrack.playlist_id)).all()
+    counts: dict[str, set[str]] = defaultdict(set)
+    for track_id, playlist_id in rows:
+        counts[track_id].add(playlist_id)
+    return {k: len(v) for k, v in counts.items()}
+
+
 def _get_artist_playlist_ids(session: Session) -> dict[str, set[str]]:
     """Map each artist to the set of playlist IDs they appear in."""
     pt_rows = session.exec(select(PlaylistTrack.track_id, PlaylistTrack.playlist_id)).all()
@@ -427,6 +515,135 @@ def _name_communities_llm(
     return {int(k): v for k, v in names.items()}
 
 
+def _build_artist_nodes(
+    session: Session,
+    G: nx.Graph,
+    node_ids: list[str],
+    uuid_to_int: dict[str, int],
+    positions: dict[str, tuple[float, float, float]],
+    node_community: dict[str, int],
+) -> tuple[list[dict], dict[int, list[dict]]]:
+    """Build node JSON array and tracks sidecar for artist graphs."""
+    artist_platforms = _get_artist_platforms(session)
+    artist_tracks = _get_artist_tracks(session)
+    artist_playlist_counts = _get_artist_playlist_counts(session)
+    artist_track_counts = _get_artist_track_counts(session)
+
+    nodes = []
+    tracks_sidecar: dict[int, list[dict]] = {}
+    for uid in node_ids:
+        node_data = G.nodes[uid]
+        connections = G.degree(uid)
+        playlist_count = artist_playlist_counts.get(uid, 0)
+        track_count = artist_track_counts.get(uid, 0)
+        pos = positions.get(uid, (500, 500, 500))
+        int_id = uuid_to_int[uid]
+        nodes.append({
+            "id": int_id,
+            "name": node_data.get("label", "Unknown"),
+            "x": round(pos[0], 1),
+            "y": round(pos[1], 1),
+            "z": round(pos[2], 1),
+            "community": node_community.get(uid, 0),
+            "connections": connections,
+            "playlists": playlist_count,
+            "trackCount": track_count,
+            "platforms": artist_platforms.get(uid, []),
+        })
+        node_tracks = artist_tracks.get(uid, [])
+        if node_tracks:
+            tracks_sidecar[int_id] = node_tracks
+
+    return nodes, tracks_sidecar
+
+
+def _build_track_nodes(
+    session: Session,
+    G: nx.Graph,
+    node_ids: list[str],
+    uuid_to_int: dict[str, int],
+    positions: dict[str, tuple[float, float, float]],
+    node_community: dict[str, int],
+) -> tuple[list[dict], dict]:
+    """Build node JSON array for track graphs (no sidecar needed)."""
+    track_platforms = _get_track_platforms(session)
+    track_playlist_counts = _get_track_playlist_counts(session)
+    track_meta = _get_track_metadata(session, set(node_ids))
+
+    nodes = []
+    for uid in node_ids:
+        node_data = G.nodes[uid]
+        connections = G.degree(uid)
+        playlist_count = track_playlist_counts.get(uid, 0)
+        pos = positions.get(uid, (500, 500, 500))
+        int_id = uuid_to_int[uid]
+        meta = track_meta.get(uid, {})
+        node_json: dict = {
+            "id": int_id,
+            "name": node_data.get("label", "Unknown"),
+            "x": round(pos[0], 1),
+            "y": round(pos[1], 1),
+            "z": round(pos[2], 1),
+            "community": node_community.get(uid, 0),
+            "connections": connections,
+            "playlists": playlist_count,
+            "platforms": track_platforms.get(uid, []),
+            "artistName": meta.get("artistName", ""),
+        }
+        if meta.get("duration") is not None:
+            node_json["duration"] = meta["duration"]
+        if meta.get("deezerId"):
+            node_json["deezerId"] = meta["deezerId"]
+        if meta.get("url"):
+            node_json["url"] = meta["url"]
+        nodes.append(node_json)
+
+    return nodes, {}
+
+
+def _build_track_communities_summary(
+    G: nx.Graph,
+    communities: list[set[str]],
+    graph_nodes: set[str],
+) -> list[dict]:
+    """Build communities summary for track graphs.
+
+    Extracts artist names from track node labels (format: "Title - Artist").
+    """
+    communities_summary = []
+    for idx, community in enumerate(communities):
+        community_in_graph = [n for n in community if n in graph_nodes]
+        community_with_degree = [
+            (G.degree(n, weight="weight"), G.nodes[n].get("label", ""))
+            for n in community_in_graph
+        ]
+        community_with_degree.sort(reverse=True)
+        # Extract artist names from track labels "Title - Artist"
+        top_artists = []
+        seen_artists: set[str] = set()
+        for _, label in community_with_degree:
+            artist = G.nodes.get(
+                next((n for n in community_in_graph if G.nodes[n].get("label") == label), ""),
+                {},
+            ).get("artist", "")
+            if not artist:
+                # Fallback: parse from label "Title - Artist"
+                parts = label.rsplit(" - ", 1)
+                artist = parts[-1] if len(parts) > 1 else label
+            if artist and artist not in seen_artists:
+                seen_artists.add(artist)
+                top_artists.append(artist)
+                if len(top_artists) >= 5:
+                    break
+        communities_summary.append({
+            "id": idx,
+            "size": len(community_in_graph),
+            "top_artists": top_artists,
+            "top_playlists": [],
+        })
+    return communities_summary
+
+
 def export_visualization_json(
     session: Session,
     output_path: Path,
@@ -445,12 +662,14 @@ def export_visualization_json(
     if config is None:
         config = VizFilterConfig()
 
+    node_type = config.node_type
+
     # Input filters: select which playlists feed the projection
     playlist_ids = get_playlist_ids(session, max_tier=config.max_tier)
 
     G = build_graph(
         session,
-        node_type="artist",
+        node_type=node_type,
         algorithm="jaccard",
         min_weight=config.min_weight,
         min_cooccurrence=config.min_cooccurrence,
@@ -485,41 +704,19 @@ def export_visualization_json(
     # Layout
     positions = _compute_community_layout(G, communities, node_community)
 
-    # Enrich nodes with metadata
-    artist_platforms = _get_artist_platforms(session)
-    artist_tracks = _get_artist_tracks(session)
-    artist_playlist_counts = _get_artist_playlist_counts(session)
-    artist_track_counts = _get_artist_track_counts(session)
-
     # Map UUIDs to integers for smaller JSON
     node_ids = list(G.nodes())
     uuid_to_int: dict[str, int] = {uid: i for i, uid in enumerate(node_ids)}
 
-    # Build nodes array
-    nodes = []
-    tracks_sidecar: dict[int, list[dict]] = {}
-    for uid in node_ids:
-        node_data = G.nodes[uid]
-        connections = G.degree(uid)
-        playlist_count = artist_playlist_counts.get(uid, 0)
-        track_count = artist_track_counts.get(uid, 0)
-        pos = positions.get(uid, (500, 500, 500))
-        int_id = uuid_to_int[uid]
-        nodes.append({
-            "id": int_id,
-            "name": node_data.get("label", "Unknown"),
-            "x": round(pos[0], 1),
-            "y": round(pos[1], 1),
-            "z": round(pos[2], 1),
-            "community": node_community.get(uid, 0),
-            "connections": connections,
-            "playlists": playlist_count,
-            "trackCount": track_count,
-            "platforms": artist_platforms.get(uid, []),
-        })
-        node_tracks = artist_tracks.get(uid, [])
-        if node_tracks:
-            tracks_sidecar[int_id] = node_tracks
+    # Enrich nodes with metadata — branch by node_type
+    if node_type == "track":
+        nodes, tracks_sidecar = _build_track_nodes(
+            session, G, node_ids, uuid_to_int, positions, node_community,
+        )
+    else:
+        nodes, tracks_sidecar = _build_artist_nodes(
+            session, G, node_ids, uuid_to_int, positions, node_community,
+        )
 
     # Build links array
     links = []
@@ -532,25 +729,31 @@ def export_visualization_json(
 
     # Build communities summary
     graph_nodes = set(G.nodes())
-    community_playlist_kw = _get_community_playlist_keywords(
-        session, communities, graph_nodes,
-    )
 
-    communities_summary = []
-    for idx, community in enumerate(communities):
-        community_in_graph = [n for n in community if n in G]
-        community_with_degree = [
-            (G.degree(n, weight="weight"), G.nodes[n].get("label", ""))
-            for n in community_in_graph
-        ]
-        community_with_degree.sort(reverse=True)
-        top_artists = [name for _, name in community_with_degree[:5]]
-        communities_summary.append({
-            "id": idx,
-            "size": len(community_in_graph),
-            "top_artists": top_artists,
-            "top_playlists": community_playlist_kw[idx],
-        })
+    # For tracks, extract artist names from node labels for community naming
+    if node_type == "track":
+        communities_summary = _build_track_communities_summary(
+            G, communities, graph_nodes,
+        )
+    else:
+        community_playlist_kw = _get_community_playlist_keywords(
+            session, communities, graph_nodes,
+        )
+        communities_summary = []
+        for idx, community in enumerate(communities):
+            community_in_graph = [n for n in community if n in G]
+            community_with_degree = [
+                (G.degree(n, weight="weight"), G.nodes[n].get("label", ""))
+                for n in community_in_graph
+            ]
+            community_with_degree.sort(reverse=True)
+            top_artists = [name for _, name in community_with_degree[:5]]
+            communities_summary.append({
+                "id": idx,
+                "size": len(community_in_graph),
+                "top_artists": top_artists,
+                "top_playlists": community_playlist_kw[idx],
+            })
 
     # Name communities via LLM (single attempt, fall back to top artists)
     try:
@@ -566,9 +769,10 @@ def export_visualization_json(
 
     # Remove top_playlists from final JSON (only used for LLM context)
     for c in communities_summary:
-        del c["top_playlists"]
+        c.pop("top_playlists", None)
 
     data = {
+        "graphType": node_type,
         "preset": {"name": config.name, "label": config.label},
         "nodes": nodes,
         "links": links,
@@ -579,20 +783,24 @@ def export_visualization_json(
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
 
-    # Write tracks sidecar (lazy-loaded by viz)
-    tracks_path = output_path.parent / "graph_tracks.json"
-    with open(tracks_path, "w", encoding="utf-8") as f:
-        json.dump(tracks_sidecar, f, ensure_ascii=False)
+    # Write tracks sidecar only for artist graphs
+    if node_type == "artist":
+        tracks_path = output_path.parent / "graph_tracks.json"
+        with open(tracks_path, "w", encoding="utf-8") as f:
+            json.dump(tracks_sidecar, f, ensure_ascii=False)
+        tracks_size_mb = tracks_path.stat().st_size / (1024 * 1024)
+    else:
+        tracks_size_mb = 0.0
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
-    tracks_size_mb = tracks_path.stat().st_size / (1024 * 1024)
     logger.info(
-        "Exported viz JSON: {} nodes, {} edges, {} communities ({:.1f} MB + {:.1f} MB tracks)",
+        "Exported viz JSON ({}): {} nodes, {} edges, {} communities ({:.1f} MB{})",
+        node_type,
         len(nodes),
         len(links),
         len(communities_summary),
         size_mb,
-        tracks_size_mb,
+        f" + {tracks_size_mb:.1f} MB tracks" if tracks_size_mb else "",
     )
 
     return {

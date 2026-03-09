@@ -50,10 +50,68 @@ body {
   height: 100%;
 }
 
+/* === Graph type tabs === */
+#graph-type-tabs {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 101;
+  display: flex;
+  gap: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.type-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 20px;
+  color: var(--gris-claro);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.type-tab:hover {
+  color: #fff;
+}
+
+.type-tab.active {
+  color: var(--violeta-neon);
+  border-bottom-color: var(--violeta-neon);
+}
+
+/* === Artist subtitle in detail panel === */
+#detail-artist-subtitle {
+  font-size: 12px;
+  color: var(--gris-claro);
+  margin-bottom: 6px;
+  display: none;
+}
+
+/* === Inline play button in detail panel === */
+#detail-play-section {
+  margin-bottom: 8px;
+}
+
+#detail-play-section .track-play {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
 /* === Search bar === */
 #search-bar {
   position: fixed;
-  top: 20px;
+  top: 68px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
@@ -520,9 +578,13 @@ body {
 
 /* === Mobile responsive === */
 @media (max-width: 768px) {
+  #graph-type-tabs {
+    top: 12px;
+  }
+
   #search-bar {
     width: calc(100% - 40px);
-    top: 12px;
+    top: 56px;
   }
 
   #legend {

@@ -113,7 +113,7 @@ def build_graph(
             f"Unknown node_type '{node_type}'. Options: {list(PROJECTIONS.keys())}"
         )
     # Pass playlist_ids filter to projection if supported
-    if playlist_ids is not None and node_type == "artist":
+    if playlist_ids is not None and node_type in ("artist", "track"):
         cooccurrence_raw = project_fn(session, playlist_ids=playlist_ids)
     else:
         cooccurrence_raw = project_fn(session)
