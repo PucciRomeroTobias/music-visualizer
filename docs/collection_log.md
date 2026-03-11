@@ -174,13 +174,25 @@ All 31 tobasso playlists now in DB (21 newly ingested on 2026-03-06, 10 previous
 - **Tier distribution (all 1,442 playlists)**: 486 tier 1, 497 tier 2, 252 tier 3, 207 tier 4
 - **CLI**: `music-graph judge-existing --max-minutes 15` (repeated 12 times)
 
+### 13. Argentine bounce scene — artist profile mining
+
+- **Date**: 2026-03-10
+- **Platform**: SoundCloud (unofficial API v2)
+- **Method**: Manual seed of Argentine bounce artists + related labels/collectives, download all their playlists
+- **Artists**: SAILO (0 playlists), Manu Calmet (2), TINKERHELL (4), Dist (7), DJ.$U$TANCIA (1), STRIPCLAB (1), HIEDRAH Club de Baile (46), Federico Guerrero (2), Gaston Fiore (7)
+- **Result**: 70 playlists ingested, 375 tracks, 160 artists parsed
+- **Note**: SAILO has no public playlists on SC. HIEDRAH was the biggest source (46 playlists — full label catalog from Buenos Aires). New playlists pending judge.
+- **CLI**: Custom script (direct SC collector calls)
+
 ## Not Yet Done
 
 - [x] ~~Download tobasso's playlists~~ (completed 2026-03-06, all 31 playlists)
 - [x] ~~SC label mining wave 1~~ (completed 2026-03-07, 25 labels, 240 playlists judged)
 - [ ] SC label mining wave 2 — ~29/37 labels remaining (resume `sc-labels --wave 2`)
 - [x] ~~Judge existing playlists~~ (completed 2026-03-07, all 1,442 playlists tiered)
+- [ ] Judge new AR playlists from collection #13 (run `judge-existing`)
 - [ ] Deezer judged search — second round with corrected profile + Ollama
+- [ ] SC: Gomboc Records — Argentine bounce label, download all playlists
 - [ ] ISRC enrichment (Deezer track details have ISRCs — never fetched)
 - [ ] Genre/tag enrichment (Last.fm tags, Deezer album genres)
 - [ ] Resolve pending 3,254 match candidates

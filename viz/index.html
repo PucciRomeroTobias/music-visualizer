@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NOWARMUP — Music Graph</title>
+    <title>NOWARMUP — Discover</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <a id="back-link" href="/">← NOWARMUP</a>
     <div id="graph-container"></div>
 
     <!-- Graph type tabs -->
@@ -38,11 +39,15 @@
 
     <!-- Community legend -->
     <div id="legend">
-      <div class="legend-title">COMMUNITIES</div>
+      <div class="legend-title" id="legend-toggle">COMMUNITIES <span class="legend-arrow">▾</span></div>
       <div id="legend-items"></div>
     </div>
 
     <!-- Detail panel (artist or track) -->
+    <!-- Navigation arrows (over the graph) -->
+    <button id="detail-prev" class="graph-nav-btn graph-nav-left hidden" title="Anterior">‹</button>
+    <button id="detail-next" class="graph-nav-btn graph-nav-right hidden" title="Siguiente">›</button>
+
     <div id="detail-panel" class="hidden">
       <button id="detail-close">&times;</button>
       <h2 id="detail-name"></h2>
@@ -63,6 +68,73 @@
       <div class="detail-section">
         <div class="detail-label" id="detail-neighbors-label">CONNECTED ARTISTS</div>
         <ul id="detail-neighbors"></ul>
+      </div>
+    </div>
+
+    <!-- Help button + panel -->
+    <button id="help-btn" title="Ayuda">?</button>
+    <div id="help-overlay" class="hidden">
+      <div id="help-panel">
+        <button id="help-close">&times;</button>
+        <h2 class="help-title">AYUDA</h2>
+
+        <div class="help-section">
+          <div class="help-label">COMUNIDADES</div>
+          <p>Los colores representan comunidades de artistas detectadas automáticamente.
+            Tocá una comunidad en la leyenda (abajo a la izquierda) para resaltar solo
+            esos nodos.</p>
+        </div>
+
+        <div class="help-section">
+          <div class="help-label">ARTISTAS / TRACKS</div>
+          <p>Las tabs de arriba alternan entre el grafo de artistas y el de tracks.
+            En el modo artistas, tocá un nodo para ver sus tracks, escuchar previews
+            y explorar sus conexiones.</p>
+        </div>
+
+        <div class="help-section">
+          <div class="help-label">PRESETS</div>
+          <p>Abajo a la izquierda podés cambiar la vista: <strong>Core Bounce</strong> muestra
+            solo el núcleo de la escena, <strong>Bounce Focus</strong> amplía el rango,
+            y <strong>Full Scene</strong> incluye todo.</p>
+        </div>
+
+        <div class="help-section">
+          <div class="help-label">CONEXIONES</div>
+          <p>Cuanto más cerca están dos nodos, más playlists comparten. Al tocar un artista
+            se muestran sus conexiones directas. El tamaño del nodo refleja la cantidad
+            de tracks (o apariciones en playlists).</p>
+        </div>
+
+        <div class="help-section">
+          <div class="help-label">SOBRE LA DATA</div>
+          <p>El grafo se construye a partir de playlists públicas de SoundCloud y Deezer
+            relacionadas con bouncy techno, hard bounce, neo rave y géneros cercanos.
+            Como los datos se extraen de playlists completas, es posible que aparezcan
+            artistas que no pertenecen estrictamente a la escena pero comparten playlist
+            con quienes sí. Es una muestra parcial — puede que falten artistas o conexiones.
+            Se actualiza periódicamente.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Welcome modal -->
+    <div id="welcome-overlay" class="hidden">
+      <div id="welcome-modal">
+        <h2 class="welcome-title">DISCOVER</h2>
+        <p class="welcome-subtitle">The Bounce electronic music map</p>
+        <p class="welcome-desc">
+          Mapa interactivo 3D que conecta artistas y tracks de la escena
+          bouncy trance, hard bounce, neo rave, hardgroove y géneros adyacentes
+          — construido a partir de co-ocurrencia en playlists de múltiples plataformas.
+        </p>
+        <div class="welcome-controls">
+          <div class="welcome-control"><span class="welcome-key">Tocá</span> un nodo para explorar un artista</div>
+          <div class="welcome-control"><span class="welcome-key">Buscá</span> cualquier artista arriba</div>
+          <div class="welcome-control"><span class="welcome-key">Escuchá</span> tocá ▶ en las tracks de cada artista</div>
+          <div class="welcome-control"><span class="welcome-key">Reset</span> para volver a la vista inicial</div>
+        </div>
+        <button id="welcome-enter">ENTRAR</button>
       </div>
     </div>
 

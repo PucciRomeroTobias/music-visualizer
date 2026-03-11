@@ -49,6 +49,9 @@ const PERF = {
 const nodeById = new Map(); // id -> copy of original node (pre-SPREAD)
 const liveNodeById = new Map(); // id -> live node object from graphData (post-SPREAD)
 const neighborMap = new Map(); // nodeId -> [{node, weight}]
+const navHistory = []; // stack of visited node ids for back navigation
+let navHistoryIndex = -1; // current position in navHistory
+let navProgrammatic = false; // true when navigating via arrows (skip push)
 let labelledNodeIds = new Set(); // top N nodes that get permanent labels
 
 // === Sprite cache (Step 2) ===
@@ -148,13 +151,13 @@ async function playDeezerPreview(deezerId, btn) {
 }
 
 // === Preset & graph type handling ===
-let currentPreset = "full-scene";
+let currentPreset = "bounce-focus";
 let currentGraphType = "artist";
 
 function getParamsFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return {
-    preset: params.get("preset") || "full-scene",
+    preset: params.get("preset") || "bounce-focus",
     type: params.get("type") || "artist",
   };
 }
@@ -212,6 +215,22 @@ async function init() {
   setupPresetSelector();
   setupGraphTypeTabs();
   hideLoading();
+
+  // Auto-select a random top-connected artist on first load
+  setTimeout(() => autoSelectRandom(), 1200);
+}
+
+function autoSelectRandom() {
+  if (!graphData || !graphData.nodes.length) return;
+  // Sort by degree (neighbor count), pick random from top 30
+  const sorted = [...graphData.nodes].sort((a, b) => {
+    const da = (neighborMap.get(a.id) || []).length;
+    const db = (neighborMap.get(b.id) || []).length;
+    return db - da;
+  });
+  const top = sorted.slice(0, 30);
+  const pick = top[Math.floor(Math.random() * top.length)];
+  if (pick) handleNodeClick(pick);
 }
 
 // === Simple string hash for z-spread ===
@@ -394,6 +413,7 @@ function createGraph() {
     .onNodeHover(handleNodeHover)
     .onBackgroundClick(handleBackgroundClick)
     .enableNodeDrag(false)
+    .showNavInfo(false)
     // Step 1: No force simulation — positions are pre-computed
     .warmupTicks(0)
     .cooldownTicks(0);
@@ -449,6 +469,7 @@ function createGraph() {
     const controls = graph.controls();
     controls.target.set(cx, cy, cz);
     controls.maxDistance = maxDist;
+    controls.zoomSpeed = 2.0;
     controls.update();
 
     // 5. Slow idle rotation around the look-at target
@@ -472,7 +493,7 @@ function createGraph() {
       idleTimer = setTimeout(() => { isUserInteracting = false; }, 500);
     });
 
-    const rotSpeed = 0.00042;
+    const rotSpeed = 0.00021;
     const center = { x: cx, y: cy, z: cz };
     (function autoRotate() {
       requestAnimationFrame(autoRotate);
@@ -566,7 +587,19 @@ function flyTo(pos, lookAt, duration = 2000) {
 // === Interactions ===
 function handleNodeClick(node) {
   if (!node) return;
+
   selectedNode = node;
+
+  // Track navigation history
+  if (!navProgrammatic) {
+    if (navHistoryIndex < navHistory.length - 1) {
+      navHistory.splice(navHistoryIndex + 1);
+    }
+    navHistory.push(node.id);
+    navHistoryIndex = navHistory.length - 1;
+  }
+  navProgrammatic = false;
+  updateNavButtons();
   // Keep selectedCommunity if set (from legend click), clear otherwise
   if (selectedCommunity !== null && node.community !== selectedCommunity) {
     selectedCommunity = null;
@@ -824,7 +857,89 @@ async function showDetail(node) {
 
 function hideDetail() {
   document.getElementById("detail-panel").classList.add("hidden");
+  document.getElementById("detail-prev")?.classList.add("hidden");
+  document.getElementById("detail-next")?.classList.add("hidden");
 }
+
+// === Detail nav arrows ===
+function updateNavButtons() {
+  const prevBtn = document.getElementById("detail-prev");
+  const nextBtn = document.getElementById("detail-next");
+  if (!prevBtn || !nextBtn) return;
+
+  const showArrows = selectedNode != null;
+  prevBtn.classList.toggle("hidden", !showArrows);
+  nextBtn.classList.toggle("hidden", !showArrows);
+
+  if (showArrows) {
+    prevBtn.disabled = navHistoryIndex <= 0;
+    nextBtn.disabled = !getNextNeighbor();
+  }
+}
+
+function getNextNeighbor() {
+  if (!selectedNode) return null;
+  const neighbors = (neighborMap.get(selectedNode.id) || [])
+    .filter((n) => n.node);
+  if (!neighbors.length) return null;
+
+  const recent = new Set(navHistory.slice(-5));
+  const sx = selectedNode.x || 0;
+  const sy = selectedNode.y || 0;
+  const sz = selectedNode.z || 0;
+
+  // Score: distance + weight + randomness, then pick from top candidates
+  const scored = neighbors
+    .filter((n) => !recent.has(n.node.id))
+    .map((n) => {
+      const live = liveNodeById.get(n.node.id);
+      const dx = (live?.x || 0) - sx;
+      const dy = (live?.y || 0) - sy;
+      const dz = (live?.z || 0) - sz;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const score = dist / (graphRadius || 1) + n.weight * 0.3 + Math.random() * 0.5;
+      return { node: n.node, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  // Pick random from top 5 candidates
+  const top = scored.slice(0, 5);
+  return top[Math.floor(Math.random() * top.length)]?.node || neighbors[0]?.node || null;
+}
+
+function setupDetailNav() {
+  document.getElementById("detail-prev")?.addEventListener("click", () => {
+    if (navHistoryIndex <= 0) return;
+    navHistoryIndex--;
+    const nodeId = navHistory[navHistoryIndex];
+    const node = liveNodeById.get(nodeId);
+    if (node) {
+      navProgrammatic = true;
+      handleNodeClick(node);
+    }
+  });
+
+  document.getElementById("detail-next")?.addEventListener("click", () => {
+    // If we have forward history, use it
+    if (navHistoryIndex < navHistory.length - 1) {
+      navHistoryIndex++;
+      const nodeId = navHistory[navHistoryIndex];
+      const node = liveNodeById.get(nodeId);
+      if (node) {
+        navProgrammatic = true;
+        handleNodeClick(node);
+      }
+      return;
+    }
+    // Otherwise, go to best unvisited neighbor
+    const next = getNextNeighbor();
+    if (next) {
+      const realNode = liveNodeById.get(next.id);
+      if (realNode) handleNodeClick(realNode);
+    }
+  });
+}
+setupDetailNav();
 
 // === Search ===
 function setupSearch() {
@@ -972,7 +1087,7 @@ function setupGraphTypeTabs() {
       if (type === currentGraphType) return;
       const url = new URL(window.location);
       url.searchParams.set("type", type);
-      url.searchParams.set("preset", "full-scene");
+      url.searchParams.set("preset", "bounce-focus");
       window.location.href = url.toString();
     });
   });
@@ -1065,7 +1180,29 @@ function setupLabelsToggle() {
 function hideLoading() {
   const loading = document.getElementById("loading");
   loading.classList.add("fade-out");
-  setTimeout(() => loading.remove(), 600);
+  setTimeout(() => {
+    loading.remove();
+    showWelcome();
+  }, 600);
+}
+
+// === Welcome modal ===
+function showWelcome() {
+  // Always show welcome — it's brief and gives context
+  const overlay = document.getElementById("welcome-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("hidden");
+
+  function dismiss() {
+    // No localStorage — show every visit
+    overlay.classList.add("hidden");
+    setTimeout(() => overlay.remove(), 400);
+  }
+
+  document.getElementById("welcome-enter").addEventListener("click", dismiss);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) dismiss();
+  });
 }
 
 // === Utils ===
@@ -1075,6 +1212,33 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+
+// === Help panel ===
+function setupHelp() {
+  const btn = document.getElementById("help-btn");
+  const overlay = document.getElementById("help-overlay");
+  if (!btn || !overlay) return;
+
+  function open() { overlay.classList.remove("hidden"); }
+  function close() { overlay.classList.add("hidden"); }
+
+  btn.addEventListener("click", open);
+  document.getElementById("help-close").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+}
+setupHelp();
+
+// === Legend collapsible (mobile) ===
+function setupLegendToggle() {
+  const toggle = document.getElementById("legend-toggle");
+  const legend = document.getElementById("legend");
+  if (!toggle || !legend) return;
+
+  toggle.addEventListener("click", () => {
+    legend.classList.toggle("legend-open");
+  });
+}
+setupLegendToggle();
 
 // === Start ===
 init();
