@@ -45,6 +45,20 @@ const PERF = {
   linkDefaultVisible: false,
 };
 
+const INITIAL_ROTATE_DELAY_MS = 500;
+const IDLE_ROTATE_DELAY_MS = 5000;
+const HIT_RADIUS_SCALE = isMobile ? 2.2 : 1.8;
+const HIT_RADIUS_PADDING = isMobile ? 3.5 : 2.25;
+const DENSE_CLUSTER_RELAX_ITERATIONS = 2;
+const DENSE_CLUSTER_RELAX_STRENGTH = 0.6;
+const DENSE_CLUSTER_MAX_SHIFT = 4.5;
+const DENSE_CLUSTER_BASE_GAP = isMobile ? 8 : 6;
+const MAX_SELECTION_LABEL_NEIGHBORS = isMobile ? 8 : 16;
+const DENSE_SELECTION_DISTANCE_BOOST = isMobile ? 1.55 : 1.35;
+
+let pauseAutoRotate = () => {};
+let deferAutoRotate = () => {};
+
 // === Node indexes ===
 const nodeById = new Map(); // id -> copy of original node (pre-SPREAD)
 const liveNodeById = new Map(); // id -> live node object from graphData (post-SPREAD)
@@ -53,6 +67,7 @@ const navHistory = []; // stack of visited node ids for back navigation
 let navHistoryIndex = -1; // current position in navHistory
 let navProgrammatic = false; // true when navigating via arrows (skip push)
 let labelledNodeIds = new Set(); // top N nodes that get permanent labels
+let selectedLabelIds = new Set();
 
 // === Sprite cache (Step 2) ===
 const spriteCache = new Map(); // nodeId -> SpriteText
@@ -158,8 +173,14 @@ function getParamsFromUrl() {
   const params = new URLSearchParams(window.location.search);
   return {
     preset: params.get("preset") || "bounce-focus",
-    type: params.get("type") || "artist",
   };
+}
+
+function normalizeDiscoverUrl() {
+  const url = new URL(window.location);
+  if (!url.searchParams.has("type")) return;
+  url.searchParams.delete("type");
+  window.history.replaceState({}, "", url.toString());
 }
 
 function dataPath(file) {
@@ -170,11 +191,123 @@ function getNodeSizeMetric(node) {
   return currentGraphType === "track" ? (node.playlists || 1) : (node.trackCount || 1);
 }
 
+function getNodeVisualRadius(node) {
+  const metric = getNodeSizeMetric(node);
+  const value = Math.pow(Math.log(metric + 1), 2);
+  return Math.cbrt(value) * 2.5;
+}
+
+function getNodeHitRadius(node) {
+  const radius = getNodeVisualRadius(node);
+  return Math.max(radius * HIT_RADIUS_SCALE, radius + HIT_RADIUS_PADDING);
+}
+
+function getNodeWorldPosition(node) {
+  return {
+    x: Number.isFinite(node.fx) ? node.fx : (node.x - 500) * SPREAD,
+    y: Number.isFinite(node.fy) ? node.fy : (node.y - 500) * SPREAD,
+    z: Number.isFinite(node.fz) ? node.fz : ((node.z || 500) - 500) * SPREAD,
+  };
+}
+
+function getDeterministicUnitVector(aId, bId) {
+  const seed = hashCode(`${aId}:${bId}`);
+  const angle = (seed % 360) * (Math.PI / 180);
+  const z = ((((seed >> 8) % 200) / 100) - 1) * 0.35;
+  const planar = Math.sqrt(Math.max(0.1, 1 - z * z));
+  return {
+    x: Math.cos(angle) * planar,
+    y: Math.sin(angle) * planar,
+    z,
+  };
+}
+
+function relaxDenseClusters(nodes) {
+  const communityBuckets = new Map();
+  for (const node of nodes) {
+    if (!communityBuckets.has(node.community)) {
+      communityBuckets.set(node.community, []);
+    }
+    communityBuckets.get(node.community).push(node);
+  }
+
+  for (const communityNodes of communityBuckets.values()) {
+    if (communityNodes.length < 2) continue;
+
+    for (let iteration = 0; iteration < DENSE_CLUSTER_RELAX_ITERATIONS; iteration++) {
+      const deltas = new Map(communityNodes.map((node) => [node.id, { x: 0, y: 0, z: 0 }]));
+      let movedAny = false;
+
+      for (let i = 0; i < communityNodes.length; i++) {
+        const a = communityNodes[i];
+        const radiusA = getNodeVisualRadius(a);
+
+        for (let j = i + 1; j < communityNodes.length; j++) {
+          const b = communityNodes[j];
+          const radiusB = getNodeVisualRadius(b);
+          const minDist = Math.max(
+            (radiusA + radiusB) * 1.35,
+            radiusA + radiusB + DENSE_CLUSTER_BASE_GAP
+          );
+
+          let dx = b.fx - a.fx;
+          let dy = b.fy - a.fy;
+          let dz = b.fz - a.fz;
+          let distSq = dx * dx + dy * dy + dz * dz;
+
+          if (distSq >= minDist * minDist) continue;
+
+          if (distSq < 0.0001) {
+            const dir = getDeterministicUnitVector(a.id, b.id);
+            dx = dir.x;
+            dy = dir.y;
+            dz = dir.z;
+            distSq = dx * dx + dy * dy + dz * dz;
+          }
+
+          const dist = Math.sqrt(distSq);
+          const ux = dx / dist;
+          const uy = dy / dist;
+          const uz = dz / dist;
+          const push = (minDist - dist) * DENSE_CLUSTER_RELAX_STRENGTH * 0.5;
+
+          const deltaA = deltas.get(a.id);
+          const deltaB = deltas.get(b.id);
+          deltaA.x -= ux * push;
+          deltaA.y -= uy * push;
+          deltaA.z -= uz * push;
+          deltaB.x += ux * push;
+          deltaB.y += uy * push;
+          deltaB.z += uz * push;
+          movedAny = true;
+        }
+      }
+
+      if (!movedAny) break;
+
+      for (const node of communityNodes) {
+        const delta = deltas.get(node.id);
+        const deltaMag = Math.hypot(delta.x, delta.y, delta.z);
+        if (!deltaMag) continue;
+
+        const clamp = Math.min(1, DENSE_CLUSTER_MAX_SHIFT / deltaMag);
+        node.fx += delta.x * clamp;
+        node.fy += delta.y * clamp;
+        node.fz += delta.z * clamp;
+        node.x = node.fx;
+        node.y = node.fy;
+        node.z = node.fz;
+      }
+    }
+  }
+}
+
 // === Load data ===
 async function init() {
   const params = getParamsFromUrl();
   currentPreset = params.preset;
-  currentGraphType = params.type;
+  currentGraphType = "artist";
+  normalizeDiscoverUrl();
 
   const res = await fetch(dataPath("graph.json"));
   graphData = await res.json();
@@ -203,8 +336,12 @@ async function init() {
     node.fx = (node.x - 500) * SPREAD;
     node.fy = (node.y - 500) * SPREAD;
     node.fz = ((node.z || 500) - 500) * SPREAD;
+    node.x = node.fx;
+    node.y = node.fy;
+    node.z = node.fz;
     liveNodeById.set(node.id, node);
   }
+  relaxDenseClusters(graphData.nodes);
 
   createGraph();
   buildLegend();
@@ -215,9 +352,6 @@ async function init() {
   setupPresetSelector();
   setupGraphTypeTabs();
   hideLoading();
-
-  // Auto-select a random top-connected artist on first load
-  setTimeout(() => autoSelectRandom(), 1200);
 }
 
 function autoSelectRandom() {
@@ -245,12 +379,24 @@ function hashCode(str) {
 // === Node mesh cache ===
 const meshCache = new Map(); // nodeId -> THREE.Mesh
 
+function clearNodeOverlays(mesh) {
+  for (let i = mesh.children.length - 1; i >= 0; i--) {
+    const child = mesh.children[i];
+    if (child.userData?.kind === "hit-area") continue;
+    mesh.remove(child);
+  }
+}
+
+function attachNodeOverlay(mesh, overlay, kind) {
+  overlay.userData = { ...(overlay.userData || {}), kind };
+  mesh.add(overlay);
+  return overlay;
+}
+
 function buildNodeObject(node) {
   let mesh = meshCache.get(node.id);
   if (!mesh) {
-    const t = getNodeSizeMetric(node);
-    const val = Math.pow(Math.log(t + 1), 2);
-    const radius = Math.cbrt(val) * 2.5;
+    const radius = getNodeVisualRadius(node);
     const baseColor = new THREE.Color(
       COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length]
     );
@@ -263,6 +409,23 @@ function buildNodeObject(node) {
       metalness: 0.1,
     });
     mesh = new THREE.Mesh(geometry, material);
+
+    const hitArea = new THREE.Mesh(
+      new THREE.SphereGeometry(
+        getNodeHitRadius(node),
+        Math.max(8, PERF.nodeResolution),
+        Math.max(8, PERF.nodeResolution)
+      ),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      })
+    );
+    hitArea.material.colorWrite = false;
+    hitArea.userData = { kind: "hit-area" };
+    mesh.add(hitArea);
+
     meshCache.set(node.id, mesh);
   }
 
@@ -271,12 +434,10 @@ function buildNodeObject(node) {
 
   // Update sprite label
   // Remove old sprite children first
-  for (let i = mesh.children.length - 1; i >= 0; i--) {
-    mesh.remove(mesh.children[i]);
-  }
+  clearNodeOverlays(mesh);
   const sprite = getOrCreateSprite(node);
   if (sprite) {
-    mesh.add(sprite);
+    attachNodeOverlay(mesh, sprite, "node-sprite");
   }
 
   return mesh;
@@ -308,22 +469,33 @@ function updateNodeMaterial(node, mesh) {
     color = "#0a0014";
   }
 
-  const c = new THREE.Color(color);
+  // Interpolate between normal and selection state using selectionFade
+  const baseColor = COMMUNITY_COLORS[node.community % COMMUNITY_COLORS.length];
+  const baseIntensity = 0.6;
+
+  let targetIntensity;
+  if (isSelected) targetIntensity = 2.0;
+  else if (isHovered) targetIntensity = 1.5;
+  else if (isNeighbor) targetIntensity = 0.8;
+  else if (isCommunityMember) targetIntensity = 0.8;
+  else if (isSameCommunity) targetIntensity = 0.25;
+  else if (selectedNode || selectedCommunity !== null) targetIntensity = 0.1;
+  else targetIntensity = baseIntensity;
+
+  const fade = selectionFade;
+  const cBase = new THREE.Color(baseColor);
+  const cTarget = new THREE.Color(color);
+  const c = cBase.lerp(cTarget, fade);
+  const intensity = baseIntensity + (targetIntensity - baseIntensity) * fade;
+
   mat.color.copy(c);
   mat.emissive.copy(c);
-
-  let intensity;
-  if (isSelected) intensity = 2.0;
-  else if (isHovered) intensity = 1.5;
-  else if (isNeighbor) intensity = 0.8;
-  else if (isCommunityMember) intensity = 0.8;
-  else if (isSameCommunity) intensity = 0.25;
-  else if (selectedNode || selectedCommunity !== null) intensity = 0.1;
-  else intensity = 0.6;
   mat.emissiveIntensity = intensity;
 
-  // Scale up on hover for visual feedback
-  const scale = isHovered ? 1.6 : 1.0;
+  // Scale up selected nodes so they read better inside dense clusters
+  let scale = 1.0;
+  if (isSelected) scale = isHovered ? 1.7 : 1.45;
+  else if (isHovered) scale = 1.6;
   mesh.scale.set(scale, scale, scale);
 }
 
@@ -335,8 +507,7 @@ function refreshNodeMaterials() {
   if (!updateAll) {
     spriteNodes = new Set();
     if (selectedNode) {
-      spriteNodes.add(selectedNode.id);
-      for (const id of selectedNeighborIds) spriteNodes.add(id);
+      for (const id of selectedLabelIds) spriteNodes.add(id);
     }
     // Also update nodes that HAD sprites before (to remove them)
     for (const id of spriteCache.keys()) spriteNodes.add(id);
@@ -348,11 +519,66 @@ function refreshNodeMaterials() {
     updateNodeMaterial(node, mesh);
 
     if (updateAll || spriteNodes.has(node.id)) {
-      for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+      clearNodeOverlays(mesh);
       const sprite = getOrCreateSprite(node);
-      if (sprite) mesh.add(sprite);
+      if (sprite) attachNodeOverlay(mesh, sprite, "node-sprite");
     }
   }
+}
+
+let selectionFade = 1; // 0 = no selection visible, 1 = fully visible
+
+function fadeInSelection(duration = 600) {
+  selectionFade = 0;
+
+  // Show links at 0 opacity, then animate
+  graph.linkVisibility(graph.linkVisibility());
+  graph.linkOpacity(0);
+
+  // Add sprites immediately at opacity 0
+  const fadeSprites = [];
+  if (selectedNode) {
+    const nodesToLabel = [...selectedLabelIds];
+    for (const id of nodesToLabel) {
+      const node = graphData.nodes.find((n) => n.id === id);
+      const mesh = meshCache.get(id);
+      if (!node || !mesh) continue;
+      // Clear existing children
+      clearNodeOverlays(mesh);
+      const sprite = getOrCreateSprite(node);
+      if (sprite) {
+        sprite.material.opacity = 0;
+        sprite.material.transparent = true;
+        attachNodeOverlay(mesh, sprite, "node-sprite");
+        fadeSprites.push(sprite);
+      }
+    }
+  }
+
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min((now - start) / duration, 1);
+    selectionFade = t * (2 - t); // ease-out quad
+
+    // Animate link opacity
+    graph.linkOpacity(0.3 * selectionFade);
+
+    // Fade in sprites
+    for (const s of fadeSprites) {
+      s.material.opacity = selectionFade;
+    }
+
+    // Fast material-only pass (no sprite recreation)
+    for (const node of graphData.nodes) {
+      const mesh = meshCache.get(node.id);
+      if (mesh) updateNodeMaterial(node, mesh);
+    }
+
+    if (t < 1) {
+      requestAnimationFrame(tick);
+    }
+  }
+  requestAnimationFrame(tick);
 }
 
 // === Create 3D graph ===
@@ -442,18 +668,20 @@ function createGraph() {
     let cx = 0, cy = 0, cz = 0;
     const N = graphData.nodes.length;
     for (const n of graphData.nodes) {
-      cx += (n.x - 500) * SPREAD;
-      cy += (n.y - 500) * SPREAD;
-      cz += ((n.z || 500) - 500) * SPREAD;
+      const pos = getNodeWorldPosition(n);
+      cx += pos.x;
+      cy += pos.y;
+      cz += pos.z;
     }
     cx /= N; cy /= N; cz /= N;
 
     // 2. Compute bounding sphere radius (P90 to ignore outliers)
     const radii = [];
     for (const n of graphData.nodes) {
-      const dx = (n.x - 500) * SPREAD - cx;
-      const dy = (n.y - 500) * SPREAD - cy;
-      const dz = ((n.z || 500) - 500) * SPREAD - cz;
+      const pos = getNodeWorldPosition(n);
+      const dx = pos.x - cx;
+      const dy = pos.y - cy;
+      const dz = pos.z - cz;
       radii.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
     }
     radii.sort((a, b) => a - b);
@@ -473,25 +701,35 @@ function createGraph() {
     controls.update();
 
     // 5. Slow idle rotation around the look-at target
-    let isUserInteracting = false;
+    let isUserInteracting = true;
     let idleTimer = null;
-    const canvas = graph.renderer().domElement;
-    const startInteraction = () => {
+    const scheduleIdleRotation = (delayMs = IDLE_ROTATE_DELAY_MS) => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        isUserInteracting = false;
+      }, delayMs);
+    };
+    pauseAutoRotate = () => {
       isUserInteracting = true;
       clearTimeout(idleTimer);
     };
+    deferAutoRotate = (delayMs = IDLE_ROTATE_DELAY_MS) => {
+      pauseAutoRotate();
+      scheduleIdleRotation(delayMs);
+    };
+    const canvas = graph.renderer().domElement;
+    const startInteraction = () => {
+      pauseAutoRotate();
+    };
     const endInteraction = () => {
-      idleTimer = setTimeout(() => { isUserInteracting = false; }, 500);
+      deferAutoRotate(IDLE_ROTATE_DELAY_MS);
     };
     canvas.addEventListener("mousedown", startInteraction);
-    canvas.addEventListener("wheel", startInteraction);
     canvas.addEventListener("touchstart", startInteraction);
     canvas.addEventListener("mouseup", endInteraction);
     canvas.addEventListener("touchend", endInteraction);
-    canvas.addEventListener("wheel", () => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => { isUserInteracting = false; }, 500);
-    });
+    canvas.addEventListener("wheel", () => deferAutoRotate(IDLE_ROTATE_DELAY_MS));
+    deferAutoRotate(INITIAL_ROTATE_DELAY_MS);
 
     const rotSpeed = 0.00021;
     const center = { x: cx, y: cy, z: cz };
@@ -525,9 +763,9 @@ function createGraph() {
 // === Step 2: Sprite cache ===
 function getOrCreateSprite(node) {
   const isSelected = selectedNode && node.id === selectedNode.id;
-  const isNeighbor = selectedNode && selectedNeighborIds.has(node.id);
-  // Show label if: selected, neighbor of selected, or toggle is on (all nodes)
-  if (!isSelected && !isNeighbor && !showLabels) {
+  const isLabelNeighbor = !isSelected && selectedLabelIds.has(node.id);
+  // Show label if: selected, curated selection context, or toggle is on (all nodes)
+  if (!isSelected && !isLabelNeighbor && !showLabels) {
     spriteCache.delete(node.id);
     return false;
   }
@@ -547,11 +785,11 @@ function getOrCreateSprite(node) {
   if (isSelected) {
     sprite.color = "#ffffff";
     sprite.backgroundColor = "rgba(10, 0, 20, 0.95)";
-    sprite.textHeight = 6;
-  } else if (isNeighbor) {
+    sprite.textHeight = isMobile ? 7.2 : 6.4;
+  } else if (isLabelNeighbor) {
     sprite.color = "rgba(255, 255, 255, 0.85)";
     sprite.backgroundColor = "rgba(0, 0, 0, 0.7)";
-    sprite.textHeight = 3.5;
+    sprite.textHeight = isMobile ? 3.8 : 3.5;
   } else if (selectedNode) {
     // Permanent label but not related — dim it
     sprite.color = "rgba(255, 255, 255, 0.15)";
@@ -566,14 +804,22 @@ function getOrCreateSprite(node) {
   const t = getNodeSizeMetric(node);
   const nodeSize = Math.pow(Math.log(t + 1), 2);
   const yOffset = isSelected
-    ? Math.cbrt(nodeSize) * 5 + 10
+    ? Math.cbrt(nodeSize) * 5.5 + (isMobile ? 14 : 12)
     : Math.cbrt(nodeSize) * 4 + 6;
   sprite.position.set(0, yOffset, 0);
+
+  // Depth testing: labels behind spheres get occluded
+  sprite.material.depthTest = !isSelected;
+  sprite.material.depthWrite = false;
+  // Bigger/more important nodes render on top of smaller ones
+  sprite.renderOrder = isSelected ? 3000 : (isLabelNeighbor ? 800 : Math.floor(nodeSize));
+
   return sprite;
 }
 
 // === Camera flight helper ===
-function flyTo(pos, lookAt, duration = 2000) {
+function flyTo(pos, lookAt, duration = 1200, onLand) {
+  pauseAutoRotate();
   cameraAnimating = true;
   graph.cameraPosition(pos, lookAt, duration);
   setTimeout(() => {
@@ -581,7 +827,9 @@ function flyTo(pos, lookAt, duration = 2000) {
     const controls = graph.controls();
     controls.target.set(lookAt.x, lookAt.y, lookAt.z);
     controls.update();
-  }, duration + 100);
+    deferAutoRotate(IDLE_ROTATE_DELAY_MS);
+    if (onLand) onLand();
+  }, duration + 50);
 }
 
 // === Interactions ===
@@ -605,25 +853,35 @@ function handleNodeClick(node) {
     selectedCommunity = null;
   }
 
-  // Build neighbor set for highlighting
+  // Build neighbor set (lightweight — just a Set of IDs)
   const neighbors = neighborMap.get(node.id) || [];
   selectedNeighborIds = new Set(neighbors.map((n) => n.node?.id).filter(Boolean));
+  selectedLabelIds = new Set([
+    node.id,
+    ...neighbors
+      .filter((n) => n.node?.id)
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, MAX_SELECTION_LABEL_NEIGHBORS)
+      .map((n) => n.node.id),
+  ]);
 
-  // Refresh visual state (materials only — no mesh recreation)
-  refreshNodeMaterials();
-  // Single link refresh — triggers one digest cycle for all link props
-  graph.linkVisibility(graph.linkVisibility());
-
+  // Show detail panel immediately (DOM-only, fast)
   showDetail(node);
 
-  // Fly camera to node — distance proportional to graph size
+  // Start camera flight — heavy visual updates deferred to landing
   const nx = node.x || 0;
   const ny = node.y || 0;
   const nz = node.z || 0;
-  const flyDist = graphRadius * 0.3;
+  const densityBoost = 1 + Math.min(1, neighbors.length / 24) * (DENSE_SELECTION_DISTANCE_BOOST - 1);
+  const flyDist = graphRadius * 0.3 * densityBoost;
   flyTo(
     { x: nx + flyDist * 0.5, y: ny + flyDist * 0.3, z: nz + flyDist * 0.8 },
-    { x: nx, y: ny, z: nz }
+    { x: nx, y: ny, z: nz },
+    1200,
+    () => {
+      // Fade in visual updates after landing
+      fadeInSelection();
+    }
   );
 }
 
@@ -665,7 +923,7 @@ function handleNodeHover(node) {
         const t = getNodeSizeMetric(hoveredNode);
         const nodeSize = Math.pow(Math.log(t + 1), 2);
         hoverSprite.position.y = Math.cbrt(nodeSize) * 4 + 8;
-        mesh.add(hoverSprite);
+        attachNodeOverlay(mesh, hoverSprite, "hover-sprite");
       }
     }
   }
@@ -678,6 +936,7 @@ function handleNodeHover(node) {
 function handleBackgroundClick() {
   selectedNode = null;
   selectedNeighborIds = new Set();
+  selectedLabelIds = new Set();
   selectedCommunity = null;
 
   // Restore visual state (materials only — no mesh recreation)
@@ -1078,6 +1337,7 @@ async function setupPresetSelector() {
 // === Graph type tabs ===
 function setupGraphTypeTabs() {
   const tabs = document.querySelectorAll(".type-tab");
+  if (!tabs.length) return;
   tabs.forEach((tab) => {
     if (tab.dataset.type === currentGraphType) {
       tab.classList.add("active");
@@ -1107,6 +1367,7 @@ let labelBatchId = 0; // incremented to cancel in-flight batches
 
 function setupLabelsToggle() {
   const btn = document.getElementById("toggle-labels");
+  if (!btn) return;
   btn.addEventListener("click", () => {
     showLabels = !showLabels;
     btn.classList.toggle("active", showLabels);
@@ -1117,7 +1378,7 @@ function setupLabelsToggle() {
       for (const node of graphData.nodes) {
         const mesh = meshCache.get(node.id);
         if (!mesh) continue;
-        for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+        clearNodeOverlays(mesh);
       }
       spriteCache.clear();
       return;
@@ -1145,12 +1406,12 @@ function setupLabelsToggle() {
         const node = sorted[idx];
         const mesh = meshCache.get(node.id);
         if (!mesh) continue;
-        for (let i = mesh.children.length - 1; i >= 0; i--) mesh.remove(mesh.children[i]);
+        clearNodeOverlays(mesh);
         const sprite = getOrCreateSprite(node);
         if (sprite) {
           sprite.material.opacity = 0;
           sprite.material.transparent = true;
-          mesh.add(sprite);
+          attachNodeOverlay(mesh, sprite, "node-sprite");
           fadingSprites.push(sprite);
         }
       }
@@ -1194,9 +1455,11 @@ function showWelcome() {
   overlay.classList.remove("hidden");
 
   function dismiss() {
-    // No localStorage — show every visit
     overlay.classList.add("hidden");
-    setTimeout(() => overlay.remove(), 400);
+    setTimeout(() => {
+      overlay.remove();
+      autoSelectRandom();
+    }, 400);
   }
 
   document.getElementById("welcome-enter").addEventListener("click", dismiss);

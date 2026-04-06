@@ -27,16 +27,15 @@ Collect → Store → Match → Build Graph → Filter → Layout → Export →
 7. **Export** — Optimized JSON with integer IDs, pre-computed positions, and LLM-generated community names.
 8. **Visualize** — WebGL 3D rendering with bloom, emissive materials, labels, search, and Deezer audio previews.
 
-## Two graph modes
+## Current graph view
 
-The visualization supports two graph types, switchable via tabs:
+The public visualization is currently focused on the artist graph. Track graphs are still exported by the pipeline, but they are no longer exposed in the main UI.
 
-| Mode | Nodes | Edges mean | Use case |
+| View | Nodes | Edges mean | Use case |
 |------|-------|-----------|----------|
 | **Artists** | Artists who appear in playlists together | Weighted by shared playlist frequency | Explore scene structure, find related artists |
-| **Tracks** | Tracks that appear in playlists together | Weighted by shared playlist frequency | Discover tracks, see what gets played together |
 
-Each mode has three presets:
+The artist graph has three presets:
 
 - **Full Scene** — All playlists up to tier 3. Broadest view.
 - **Bounce Focus** — Tier 1-2 playlists only. More focused on core bounce/rave.
@@ -100,7 +99,6 @@ npm run dev    # → http://localhost:5173
 
 ### URL parameters
 
-- `?type=artist` or `?type=track` — switch graph mode
 - `?preset=full-scene` / `bounce-focus` / `core-only` — select preset
 
 ## Project structure
