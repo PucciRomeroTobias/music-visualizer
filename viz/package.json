@@ -14,6 +14,6 @@
     "three-spritetext": "^1.10.0"
   },
   "devDependencies": {
-    "vite": "^6.0.0"
+    "vite": "^8.2.2"
   }
 }
