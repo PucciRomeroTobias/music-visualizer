@@ -1,133 +1,177 @@
 # music-graph
 
-Interactive 3D visualization of the underground electronic music scene, built from playlist co-occurrence data across Deezer and SoundCloud.
+[![CI](https://github.com/PucciRomeroTobias/music-visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/PucciRomeroTobias/music-visualizer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-c02deb.svg)](LICENSE)
 
-![Artist co-occurrence graph — Full Scene preset, 3500+ artists across 16 communities](docs/images/artist-graph.png)
+An interactive map of artist relationships in underground electronic music, built from public playlist co-occurrence data.
 
-## What is this?
+**[Open the live visualization](https://www.nowarmup.com.ar/discover/)**
 
-**music-graph** maps the connections between artists and tracks in micro-genres that don't exist as formal categories on any platform: **bouncy techno, hard bounce, neo rave, hardgroove, neo trance, eurotrance**, and adjacent sub-genres of acid techno, hard techno, and psytrance.
+![The live artist graph, with automatically detected communities](docs/images/discover-overview.png)
 
-These scenes are discovered through keyword search, playlist co-occurrence, and artist overlap — not platform taxonomies. The project makes the invisible connections visible.
+## What this project does
 
-The end goal is a live graph on [nowarmup.com.ar](https://nowarmup.com.ar).
+Platform taxonomies do not consistently describe small, overlapping scenes such as bouncy techno, hard bounce, neo rave, hardgroove, and neo trance. This project treats playlists as observations: artists that repeatedly occur in the same playlists become connected in a weighted graph.
 
-## How it works
+The repository contains two related pieces:
 
+- a Python pipeline that collects and normalizes metadata, resolves cross-platform identities, builds weighted graphs, detects communities, and exports visualization data;
+- a framework-free Vite frontend that renders the exported artist graph in WebGL with search, community filtering, artist details, and Deezer previews when available.
+
+This is an exploratory map, not an authoritative genre classifier. The result reflects its seeds, available public playlists, collection date, relevance heuristics, and platform coverage. Missing artists and surprising connections are expected.
+
+![An artist detail panel in the live visualization](docs/images/discover-artist-detail.png)
+
+## Pipeline
+
+```text
+Collect → Store → Match → Project → Filter → Layout → Export → Visualize
 ```
-Collect → Store → Match → Build Graph → Filter → Layout → Export → Visualize
+
+1. **Collect:** ingest playlists and tracks from Deezer or SoundCloud.
+2. **Store:** keep canonical entities and platform-specific source records in SQLite through SQLModel.
+3. **Match:** deduplicate tracks and artists using ISRCs, normalized names, durations, fuzzy matching, and optional MusicBrainz lookups.
+4. **Project:** turn playlist/track membership into weighted artist or track co-occurrence graphs.
+5. **Filter:** apply relevance tiers, minimum degree, blocklists, and rendering budgets.
+6. **Layout:** detect Leiden communities and pre-compute 3D positions.
+7. **Export:** write compact JSON plus an artist-to-track sidecar.
+8. **Visualize:** render the fixed layout using `3d-force-graph` and Three.js.
+
+The main UI currently exposes only the artist graph. The repository also keeps an earlier Sigma.js 2D prototype in `viz-sigma/` for comparison.
+
+## Repository layout
+
+```text
+config/                  Seed terms and pipeline settings
+docs/                    Architecture, research notes, and screenshots
+src/music_graph/         Python package and CLI
+  collectors/            Deezer, SoundCloud, and Spotify adapters
+  graph/                 Projections, edge weights, and exports
+  matching/              Cross-platform normalization and resolution
+  pipeline/              Collection, graph building, filtering, and viz export
+viz/                     Current Three.js visualization
+viz-sigma/               Experimental Sigma.js visualization
+tests/                   Fast unit tests for matching and graph logic
 ```
 
-1. **Collect** — BFS expansion from seed keywords across Deezer and SoundCloud. An LLM judge (Gemini) evaluates playlist relevance and assigns tier scores (1-3).
-2. **Store** — SQLite via SQLModel. Platform-agnostic canonical entities (Track, Artist) linked to platform-specific sources (TrackSource, ArtistSource).
-3. **Match** — Cross-platform deduplication via ISRC, fuzzy matching (RapidFuzz), and MusicBrainz lookups. Same track on Deezer and SoundCloud → one node.
-4. **Build Graph** — Bipartite projection: playlists × tracks → weighted co-occurrence edges between artists (or between tracks). Weight algorithms: Jaccard, PMI, cosine, raw count.
-5. **Filter** — Pluggable preset system with tier filtering, degree pruning, blocklists, and auto-tightening to fit performance budgets.
-6. **Layout** — Community detection (Leiden algorithm) + two-level 3D spring layout: community centers first, then nodes within each community.
-7. **Export** — Optimized JSON with integer IDs, pre-computed positions, and LLM-generated community names.
-8. **Visualize** — WebGL 3D rendering with bloom, emissive materials, labels, search, and Deezer audio previews.
+## Requirements
 
-## Current graph view
+- Python 3.11 or newer
+- [uv](https://docs.astral.sh/uv/) for the locked Python environment
+- Node.js 22 and npm for the frontend
+- A WebGL-capable browser
 
-The public visualization is currently focused on the artist graph. Track graphs are still exported by the pipeline, but they are no longer exposed in the main UI.
+No credentials are needed to run tests, build either frontend, or explore the bundled synthetic sample. Collection commands have different requirements:
 
-| View | Nodes | Edges mean | Use case |
-|------|-------|-----------|----------|
-| **Artists** | Artists who appear in playlists together | Weighted by shared playlist frequency | Explore scene structure, find related artists |
+- Deezer's public endpoints do not currently require a key.
+- Spotify requires an application client ID and secret. The collector uses a user OAuth flow.
+- SoundCloud requires a user-provided OAuth token and client ID for an unofficial API.
+- LLM-assisted judging/naming requires local Ollama, `GOOGLE_API_KEY`, or `GROQ_API_KEY`.
 
-The artist graph has three presets:
+Copy `.env.example` to `.env` only when you need those integrations. Never commit that file.
 
-- **Full Scene** — All playlists up to tier 3. Broadest view.
-- **Bounce Focus** — Tier 1-2 playlists only. More focused on core bounce/rave.
-- **Core Bounce** — Tier 1 only. The tightest, most relevant cluster.
+## Quick start
 
-![Track detail panel — showing duration, play button, and connected tracks](docs/images/track-detail.png)
-
-## Current scale
-
-| Entity | Count |
-|--------|-------|
-| Playlists | ~1,400 (Deezer + SoundCloud) |
-| Tracks | ~77,000 canonical |
-| Artists | ~21,000 canonical |
-| Artist graph (full-scene) | ~3,500 nodes, 16 communities |
-| Track graph (full-scene) | ~3,600 nodes, 30 communities |
-
-## Tech stack
-
-### Backend (data pipeline)
-
-- Python 3.11+, SQLModel (SQLAlchemy + Pydantic), SQLite
-- NetworkX for graph construction, igraph + leidenalg for community detection
-- Typer CLI, Loguru logging, RapidFuzz for fuzzy matching
-- Gemini API for playlist relevance judging and community naming
-
-### Frontend (visualization)
-
-- [3d-force-graph](https://github.com/vasturiano/3d-force-graph) + Three.js for WebGL 3D rendering
-- Vite for bundling
-- Vanilla JS — no framework, optimized for mobile performance
-- Deezer JSONP API for audio previews
-
-## Setup
-
-### Backend
+### Explore the bundled sample
 
 ```bash
-# Create virtual environment and install
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# Copy environment template
-cp .env.example .env  # add API keys (Gemini for judging/naming)
-
-# Run a collection batch
-music-graph dz-search --max-minutes 15
-
-# Export visualization data
-music-graph export-viz all --graph-type all
+git clone https://github.com/PucciRomeroTobias/music-visualizer.git
+cd music-visualizer/viz
+npm ci
+npm run dev
 ```
 
-### Frontend
+Open `http://localhost:5173/discover/`. The committed six-node dataset is synthetic and exists only to make local development reproducible. The live site uses a separately generated dataset.
+
+### Set up the pipeline
+
+From the repository root:
+
+```bash
+uv sync --dev
+uv run music-graph --help
+```
+
+To initialize an empty database and inspect it:
+
+```bash
+uv run music-graph stats
+```
+
+Runtime data is written below `data/` and intentionally ignored by Git.
+
+## Collection and export
+
+Review `config/seeds.toml` and `config/settings.toml` before collecting. Network collection can be slow, may be rate-limited, and is designed to run in resumable batches.
+
+Examples:
+
+```bash
+# Public Deezer keyword search, capped at 15 minutes
+uv run music-graph dz-search --max-minutes 15
+
+# SoundCloud search after configuring .env
+uv run music-graph sc-search --max-minutes 15
+
+# Resolve candidate cross-platform matches
+uv run music-graph match --entity all --max-minutes 15
+
+# Export every visualization preset and graph type
+uv run music-graph export-viz all --graph-type all
+```
+
+Generated frontend data is placed under `viz/public/data/`. That directory can contain large derived datasets and source metadata, so only the small synthetic sample is tracked. Review exports before publishing them.
+
+## Development and tests
+
+Run the backend checks:
+
+```bash
+uv sync --dev
+uv run ruff check src tests
+uv run pytest
+uv run pip-audit
+```
+
+Build and audit the current visualization:
 
 ```bash
 cd viz
-npm install
-npm run dev    # → http://localhost:5173
+npm ci
+npm run build
+npm audit
 ```
 
-### URL parameters
+The same commands work in `viz-sigma/`. CI runs linting, unit tests, dependency audits, and production builds for both frontends on every pull request and push to `main`.
 
-- `?preset=full-scene` / `bounce-focus` / `core-only` — select preset
+## Production build and deployment
 
-## Project structure
+`viz/vite.config.js` sets the production base path to `/discover/`. Build it with:
 
-```
-config/                  # seeds.toml, settings.toml
-data/                    # SQLite DB, exports (gitignored)
-docs/                    # Architecture, research, design guidelines
-src/music_graph/
-  cli.py                 # Typer CLI commands
-  config.py              # Config loader (TOML + .env)
-  db.py                  # Engine + session management
-  collectors/            # Platform collectors (Deezer, SoundCloud)
-  models/                # SQLModel entities
-  pipeline/              # Orchestration (collect, build, filter, export)
-  graph/                 # Projections, edge weights, export formats
-  matching/              # Cross-platform matching (fuzzy, ISRC, MusicBrainz)
-  judge/                 # LLM-based relevance judge (Gemini)
-viz/
-  index.html             # Single-page app
-  main.js                # 3D graph rendering + interactions
-  style.css              # Neon/rave aesthetic (nowarmup brand)
-  public/data/           # Exported graph JSON (gitignored)
+```bash
+cd viz
+npm ci
+npm run build
 ```
 
-## Visual identity
+Deploy the contents of `viz/dist/` at `/discover/` together with the generated `data/` tree. For another path or root-domain deployment, change Vite's `base` setting before building.
 
-Part of the [nowarmup](https://nowarmup.com.ar) brand. Neon-on-black aesthetic: violeta neon `#C02DEB`, rosa neon `#F000D8`, cian electrico `#65EDFA` on pure black `#000000`. Typography: Eurostile (headings) + Inter (body).
+The public demo is served by Vercel as part of the separate nowarmup website, not from this repository. This repository therefore validates deployable artifacts in CI but does not automatically publish the production dataset or site. At the time of the latest verification, the live `bounce-focus` view contained 2,171 artists and 94,973 weighted edges.
+
+## Data, privacy, and platform caveats
+
+- The database and exports are intentionally excluded because they are large, time-dependent derived artifacts and may contain source-platform metadata.
+- Do not commit API keys, OAuth tokens, cookies, private playlists, or raw user data.
+- The SoundCloud adapter depends on an unofficial API. It can change without notice and may not be appropriate for every account or use case; review current platform terms before using it.
+- Playlist relevance and community labels may be assisted by an LLM. Those outputs are heuristic and should be reviewed before publication.
+- Deezer previews are requested directly by the browser and depend on Deezer availability and policy.
+
+Please report security issues privately as described in [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a pull request; `main` requires CI and code-owner review.
 
 ## License
 
-Private project.
+[MIT](LICENSE) © 2026 Tobias Pucci Romero. Third-party music metadata, artwork, and audio previews remain subject to their respective owners' and platforms' terms.
