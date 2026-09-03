@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /viz
+    schedule:
+      interval: weekly
+    groups:
+      visualization-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /viz-sigma
+    schedule:
+      interval: weekly
+    groups:
+      sigma-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

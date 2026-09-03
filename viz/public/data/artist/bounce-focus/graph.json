@@ -1,0 +1,23 @@
+{
+  "nodes": [
+    {"id":"a1","name":"Pulse Vector","community":0,"connections":3,"playlists":8,"trackCount":5,"platforms":["deezer"],"x":360,"y":470,"z":520},
+    {"id":"a2","name":"Neon Transit","community":0,"connections":2,"playlists":6,"trackCount":4,"platforms":["soundcloud"],"x":430,"y":380,"z":460},
+    {"id":"a3","name":"Acid Meridian","community":0,"connections":2,"playlists":5,"trackCount":3,"platforms":["deezer","soundcloud"],"x":450,"y":550,"z":430},
+    {"id":"a4","name":"Night Circuit","community":1,"connections":3,"playlists":7,"trackCount":5,"platforms":["soundcloud"],"x":600,"y":520,"z":510},
+    {"id":"a5","name":"Kinetic Bloom","community":1,"connections":2,"playlists":4,"trackCount":3,"platforms":["deezer"],"x":650,"y":410,"z":560},
+    {"id":"a6","name":"Static Ritual","community":1,"connections":2,"playlists":4,"trackCount":2,"platforms":["deezer","soundcloud"],"x":560,"y":620,"z":470}
+  ],
+  "links": [
+    {"source":"a1","target":"a2","weight":0.72},
+    {"source":"a1","target":"a3","weight":0.65},
+    {"source":"a2","target":"a3","weight":0.58},
+    {"source":"a1","target":"a4","weight":0.31},
+    {"source":"a4","target":"a5","weight":0.77},
+    {"source":"a4","target":"a6","weight":0.68},
+    {"source":"a5","target":"a6","weight":0.55}
+  ],
+  "communities": [
+    {"id":0,"name":"Neon Bounce","size":3,"top_artists":["Pulse Vector","Neon Transit","Acid Meridian"]},
+    {"id":1,"name":"Hard Trance","size":3,"top_artists":["Night Circuit","Kinetic Bloom","Static Ritual"]}
+  ]
+}

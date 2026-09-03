@@ -1,0 +1,11 @@
+{
+  "artist": [
+    {
+      "name": "bounce-focus",
+      "label": "Sample Scene",
+      "nodes": 6,
+      "edges": 7,
+      "communities": 2
+    }
+  ]
+}
