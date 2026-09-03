@@ -6,9 +6,14 @@ from datetime import datetime
 from loguru import logger
 from sqlmodel import Session, func, select
 
-from music_graph.collectors.base import AbstractCollector, RawArtist, RawPlaylist, RawTrack
-from music_graph.matching.normalize import normalize_name
+from music_graph.collectors.base import (
+    AbstractCollector,
+    RawArtist,
+    RawPlaylist,
+    RawTrack,
+)
 from music_graph.config import load_seeds, load_settings
+from music_graph.matching.normalize import normalize_name
 from music_graph.models.artist import Artist, ArtistGenre, ArtistSource
 from music_graph.models.base import ArtistRole, SourcePlatform
 from music_graph.models.genre import Genre

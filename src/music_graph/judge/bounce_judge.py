@@ -1,7 +1,6 @@
 """Bounce scene judge — evaluates playlists, artists, and matches."""
 
 import json
-from pathlib import Path
 
 from loguru import logger
 

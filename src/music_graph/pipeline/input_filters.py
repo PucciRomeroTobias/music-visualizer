@@ -5,9 +5,8 @@ of playlist IDs to include. Filters are composable: the intersection
 of all active filters determines the final set.
 """
 
-from sqlmodel import Session, select
-
 from loguru import logger
+from sqlmodel import Session, select
 
 from music_graph.models.playlist import Playlist
 

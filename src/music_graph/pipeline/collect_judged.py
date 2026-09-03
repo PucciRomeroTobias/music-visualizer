@@ -534,8 +534,8 @@ def judge_existing_playlists(
         "timed_out": 0,
     }
 
-    from music_graph.models.track import Track
     from music_graph.models.playlist import PlaylistTrack
+    from music_graph.models.track import Track
 
     # Snapshot: grab IDs + metadata of unjudged playlists (short read)
     unjudged = session.exec(

@@ -153,10 +153,12 @@ async function main() {
 
       const item = document.createElement("div");
       item.className = "legend-item";
-      item.innerHTML = `
-        <span class="legend-color" style="background:${color}"></span>
-        <span>${label} (${comm.size})</span>
-      `;
+      const swatch = document.createElement("span");
+      swatch.className = "legend-color";
+      swatch.style.background = color;
+      const text = document.createElement("span");
+      text.textContent = `${label} (${comm.size})`;
+      item.append(swatch, text);
       legendItems.appendChild(item);
     }
   }
@@ -203,7 +205,11 @@ async function main() {
     detailTracks.innerHTML = "";
     for (const t of nodeData.tracks || []) {
       const li = document.createElement("li");
-      li.innerHTML = `${t.title} <span class="track-platform">${t.platform}</span>`;
+      li.appendChild(document.createTextNode(`${t.title || "Untitled"} `));
+      const platform = document.createElement("span");
+      platform.className = "track-platform";
+      platform.textContent = t.platform || "";
+      li.appendChild(platform);
       detailTracks.appendChild(li);
     }
 
@@ -228,7 +234,11 @@ async function main() {
 
     for (const nb of neighborWeights) {
       const li = document.createElement("li");
-      li.innerHTML = `${nb.name} <span class="neighbor-weight">${nb.weight.toFixed(3)}</span>`;
+      li.appendChild(document.createTextNode(`${nb.name} `));
+      const weight = document.createElement("span");
+      weight.className = "neighbor-weight";
+      weight.textContent = nb.weight.toFixed(3);
+      li.appendChild(weight);
       li.addEventListener("click", () => {
         renderer.getCamera().animate(
           { ...renderer.getNodeDisplayData(nb.id), ratio: 0.15 },

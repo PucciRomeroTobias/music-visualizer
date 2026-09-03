@@ -3,7 +3,6 @@
 import re
 from dataclasses import dataclass, field
 
-
 # Prefix patterns to strip before parsing
 _PREFIX_PATTERNS = [
     re.compile(r"^premiere\s*:\s*", re.IGNORECASE),

@@ -9,18 +9,17 @@ Designed for incremental batch execution:
 import time
 
 import requests
-
 from loguru import logger
 from sqlmodel import Session, select
 
-from music_graph.collectors.base import RawArtist, RawPlaylist, RawTrack
+from music_graph.collectors.base import RawArtist, RawPlaylist
 from music_graph.collectors.soundcloud import SoundCloudCollector
 from music_graph.matching.normalize import normalize_name
 from music_graph.matching.title_parser import parse_soundcloud_title
 from music_graph.models.artist import Artist, ArtistSource
 from music_graph.models.base import SourcePlatform
 from music_graph.models.playlist import Playlist
-from music_graph.models.track import Track, TrackSource
+from music_graph.models.track import TrackSource
 from music_graph.pipeline.collect import Ingester
 
 

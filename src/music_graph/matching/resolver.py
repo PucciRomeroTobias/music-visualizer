@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from loguru import logger
 from rapidfuzz import fuzz
-from sqlmodel import Session, delete, func, select
+from sqlmodel import Session, func, select
 
 from music_graph.matching.normalize import normalize_name, normalize_track_title
 from music_graph.models.artist import Artist, ArtistGenre, ArtistSource

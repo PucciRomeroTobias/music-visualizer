@@ -15,7 +15,7 @@ def collect(
     max_depth: int = typer.Option(2, help="Maximum BFS depth"),
 ) -> None:
     """Collect music data from a platform using BFS expansion."""
-    from music_graph.db import get_engine, init_db, get_session
+    from music_graph.db import get_engine, get_session, init_db
 
     engine = get_engine()
     init_db(engine)
@@ -44,13 +44,14 @@ def stats() -> None:
     """Show database statistics with platform breakdown."""
     from sqlmodel import func, select
 
-    from music_graph.db import get_engine, get_session
+    from music_graph.db import get_engine, get_session, init_db
     from music_graph.models.artist import Artist, ArtistSource
     from music_graph.models.genre import Genre
     from music_graph.models.playlist import Playlist, PlaylistTrack
     from music_graph.models.track import Track, TrackSource
 
     engine = get_engine()
+    init_db(engine)
     with get_session(engine) as session:
         tracks = session.exec(select(func.count(Track.id))).one()
         track_sources = session.exec(select(func.count(TrackSource.id))).one()
@@ -468,7 +469,7 @@ def export_viz(
 @app.command("repair-links")
 def repair_links() -> None:
     """Repair missing TrackArtist links by matching track.canonical_artist_name to artist.canonical_name."""
-    from sqlmodel import func, select
+    from sqlmodel import select
 
     from music_graph.db import get_engine, get_session
     from music_graph.matching.normalize import normalize_name

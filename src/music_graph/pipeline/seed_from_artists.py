@@ -227,7 +227,6 @@ def seed_from_artists(
                 if artist_pid in seen_artists_ids:
                     # Link existing artist to this track
                     from music_graph.models.artist import ArtistSource
-                    from music_graph.models.base import SourcePlatform
 
                     existing_source = session.exec(
                         select(ArtistSource).where(

@@ -5,7 +5,7 @@ import os
 from loguru import logger
 from spotipy import Spotify
 from spotipy.exceptions import SpotifyException
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth
 
 from music_graph.collectors.base import RawArtist, RawPlaylist, RawTrack
 from music_graph.collectors.rate_limiter import RateLimiter

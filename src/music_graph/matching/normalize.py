@@ -3,7 +3,6 @@
 import re
 import unicodedata
 
-
 # Noise words to strip from artist names
 _ARTIST_NOISE = re.compile(
     r"\b(official|music|vevo|records|label)\b", re.IGNORECASE

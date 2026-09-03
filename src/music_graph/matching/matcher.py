@@ -4,7 +4,6 @@ from loguru import logger
 from sqlmodel import Session, select
 
 from music_graph.matching.fuzzy import is_fuzzy_match
-from music_graph.matching.musicbrainz import lookup_by_isrc
 from music_graph.models.matching import MatchCandidate, MatchMethod, MatchStatus
 from music_graph.models.track import Track, TrackSource
 

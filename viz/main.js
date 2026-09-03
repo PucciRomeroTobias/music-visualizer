@@ -974,6 +974,29 @@ function formatDuration(seconds) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function appendStat(container, value, label) {
+  const item = document.createElement("div");
+  item.className = "stat-item";
+  const valueEl = document.createElement("div");
+  valueEl.className = "stat-value";
+  valueEl.textContent = String(value);
+  const labelEl = document.createElement("div");
+  labelEl.className = "stat-label";
+  labelEl.textContent = label;
+  item.append(valueEl, labelEl);
+  container.appendChild(item);
+}
+
+function safeExternalUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 async function showDetail(node) {
   // Use stored copy since 3d-force-graph strips custom fields from node objects
   const data = nodeById.get(node.id) || node;
@@ -1016,35 +1039,13 @@ async function showDetail(node) {
   const statsEl = document.getElementById("detail-stats");
   statsEl.innerHTML = "";
   if (isTrackMode) {
-    statsEl.innerHTML = `
-      <div class="stat-item">
-        <div class="stat-value">${data.connections ?? 0}</div>
-        <div class="stat-label">CONNECTIONS</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">${data.playlists ?? 0}</div>
-        <div class="stat-label">PLAYLISTS</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">${formatDuration(data.duration)}</div>
-        <div class="stat-label">DURATION</div>
-      </div>
-    `;
+    appendStat(statsEl, data.connections ?? 0, "CONNECTIONS");
+    appendStat(statsEl, data.playlists ?? 0, "PLAYLISTS");
+    appendStat(statsEl, formatDuration(data.duration), "DURATION");
   } else {
-    statsEl.innerHTML = `
-      <div class="stat-item">
-        <div class="stat-value">${data.connections ?? 0}</div>
-        <div class="stat-label">CONNECTIONS</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">${data.playlists ?? 0}</div>
-        <div class="stat-label">PLAYLISTS</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">${data.trackCount ?? 0}</div>
-        <div class="stat-label">TRACKS</div>
-      </div>
-    `;
+    appendStat(statsEl, data.connections ?? 0, "CONNECTIONS");
+    appendStat(statsEl, data.playlists ?? 0, "PLAYLISTS");
+    appendStat(statsEl, data.trackCount ?? 0, "TRACKS");
   }
 
   // Inline play button (track mode with deezerId)
@@ -1075,13 +1076,29 @@ async function showDetail(node) {
     tracksList.innerHTML = "";
     for (const t of nodeTracks) {
       const li = document.createElement("li");
-      const titleHtml = t.url
-        ? `<a href="${t.url}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a>`
-        : escapeHtml(t.title);
-      const playBtn = t.deezerId
-        ? `<button class="track-play" data-deezer-id="${t.deezerId}" title="Preview">▶</button>`
-        : "";
-      li.innerHTML = `${playBtn}${titleHtml}<span class="track-platform">${t.platform}</span>`;
+      if (t.deezerId) {
+        const playBtn = document.createElement("button");
+        playBtn.className = "track-play";
+        playBtn.dataset.deezerId = String(t.deezerId);
+        playBtn.title = "Preview";
+        playBtn.textContent = "▶";
+        li.appendChild(playBtn);
+      }
+      const externalUrl = safeExternalUrl(t.url);
+      if (externalUrl) {
+        const link = document.createElement("a");
+        link.href = externalUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = t.title;
+        li.appendChild(link);
+      } else {
+        li.appendChild(document.createTextNode(t.title || "Untitled"));
+      }
+      const platform = document.createElement("span");
+      platform.className = "track-platform";
+      platform.textContent = t.platform || "";
+      li.appendChild(platform);
       tracksList.appendChild(li);
     }
     tracksList.querySelectorAll(".track-play").forEach((btn) => {
@@ -1103,7 +1120,11 @@ async function showDetail(node) {
   neighborsList.innerHTML = "";
   for (const { node: n, weight } of neighbors) {
     const li = document.createElement("li");
-    li.innerHTML = `${escapeHtml(n.name)}<span class="neighbor-weight">${weight.toFixed(3)}</span>`;
+    li.appendChild(document.createTextNode(n.name));
+    const weightEl = document.createElement("span");
+    weightEl.className = "neighbor-weight";
+    weightEl.textContent = weight.toFixed(3);
+    li.appendChild(weightEl);
     li.addEventListener("click", () => {
       const realNode = liveNodeById.get(n.id);
       if (realNode) handleNodeClick(realNode);
