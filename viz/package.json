@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "3d-force-graph": "^1.73.4",
-    "three": "^0.185.0",
+    "three": "^0.186.0",
     "three-spritetext": "^1.10.0"
   },
   "devDependencies": {
-    "vite": "^8.2.2"
+    "vite": "^8.3.0"
   }
 }
